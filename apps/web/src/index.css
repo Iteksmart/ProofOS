@@ -1,0 +1,202 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------- Fable 5 NOC palette ---------- */
+:root {
+  --bg: #0f0f12;
+  --bg2: #141419;
+  --bg3: #1a1a20;
+  --tx: #c5c1b9;
+  --tx2: #8a8780;
+  --w: #eceae5;
+  --acc: #9933ff;
+  --acc2: #b366ff;
+  --grn: #4ade80;
+  --red: #ef4444;
+  --yel: #f5a623;
+}
+
+html { color-scheme: dark; }
+html.light { color-scheme: light; }
+
+body {
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--tx);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.app-bg { background-color: var(--bg); }
+
+/* ---------- Warm dark remap (slate → Fable 5 warm greys) ---------- */
+.bg-slate-950 { background-color: #0f0f12 !important; }
+.bg-slate-900 { background-color: #141419 !important; }
+.bg-slate-800 { background-color: #1a1a20 !important; }
+.bg-slate-700 { background-color: #26262d !important; }
+.text-slate-100 { color: #eceae5 !important; }
+.text-slate-300 { color: #d4d1ca !important; }
+.text-slate-400 { color: #c5c1b9 !important; }
+.text-slate-500 { color: #8a8780 !important; }
+.text-slate-600 { color: #6b6863 !important; }
+.border-slate-800 { border-color: rgba(255, 255, 255, 0.05) !important; }
+.border-slate-700 { border-color: rgba(255, 255, 255, 0.1) !important; }
+.divide-slate-800 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(255, 255, 255, 0.04) !important; }
+
+/* ---------- Cards (flat, Fable 5) ---------- */
+.card {
+  background: var(--bg2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  transition: border-color 0.15s ease;
+}
+.card.hover:hover { border-color: rgba(153, 51, 255, 0.35); }
+
+/* ---------- Purple accent ---------- */
+.gradient-text {
+  background: linear-gradient(90deg, #b366ff, #9933ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.gradient-bar { background: linear-gradient(135deg, #b366ff, #7c3aed); }
+
+/* Fable 5 signature: uppercase, letter-spaced purple section headers */
+main h2, .card h2, section h2 {
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--acc);
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+
+/* ---------- Buttons → purple ---------- */
+.btn-primary,
+button.bg-emerald-600 {
+  background: linear-gradient(135deg, #9933ff, #7c3aed) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 16px rgba(153, 51, 255, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.12s ease;
+}
+button.bg-sky-600 {
+  background: linear-gradient(135deg, #7c3aed, #6d28d9) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.26);
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+button.bg-emerald-600:hover,
+button.bg-sky-600:hover,
+.btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background 0.12s ease;
+}
+.btn-ghost:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* ---------- Nav ---------- */
+.nav-pill {
+  border-radius: 10px;
+  border: 1px solid transparent;
+  transition: all 0.14s ease;
+}
+.nav-pill:hover { background: rgba(255, 255, 255, 0.06); }
+.nav-pill.active {
+  background: rgba(153, 51, 255, 0.16);
+  border-color: rgba(153, 51, 255, 0.4);
+  color: #d8b4fe;
+  box-shadow: 0 0 16px rgba(153, 51, 255, 0.18);
+}
+
+/* ---------- Inputs ---------- */
+.input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.input:focus,
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: rgba(153, 51, 255, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(153, 51, 255, 0.15);
+}
+
+/* Links + action links → purple */
+a { color: var(--acc); }
+.text-sky-400 { color: #b366ff !important; }
+
+/* ---------- Badges (Fable 5 pill) ---------- */
+.badge-pill {
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.badge-pill.ok { background: rgba(74, 222, 128, 0.1); color: var(--grn); border: 1px solid rgba(74, 222, 128, 0.3); }
+.badge-pill.bad { background: rgba(239, 68, 68, 0.1); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3); }
+
+/* ---------- Heatmap cells ---------- */
+.cell { border-radius: 6px; padding: 6px 10px; font-size: 11px; }
+.cell.normal { background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.2); }
+.cell.elevated { background: rgba(245, 166, 35, 0.12); border: 1px solid rgba(245, 166, 35, 0.3); }
+.cell.critical { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: var(--red); }
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); background-clip: padding-box; }
+
+/* ---------- Animations ---------- */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fade-up 0.4s ease both; }
+
+@keyframes pulse-bar {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.animate-pulse-bar { animation: pulse-bar 1.4s ease-in-out infinite; }
+
+/* ---------- Light theme ---------- */
+.light body { background: #f4f4f6; color: #1c1c20; }
+.light .app-bg { background-color: #f4f4f6; }
+.light .bg-slate-950 { background-color: #f4f4f6 !important; }
+.light .bg-slate-900 { background-color: #ffffff !important; }
+.light .bg-slate-800 { background-color: #ececf0 !important; }
+.light .bg-slate-700 { background-color: #dedee4 !important; }
+.light .text-slate-100 { color: #1c1c20 !important; }
+.light .text-slate-300 { color: #2b2b31 !important; }
+.light .text-slate-400 { color: #4a4a52 !important; }
+.light .text-slate-500 { color: #6b6b74 !important; }
+.light .border-slate-800 { border-color: #e4e4ea !important; }
+.light .border-slate-700 { border-color: #d8d8e0 !important; }
+.light .divide-slate-800 > :not([hidden]) ~ :not([hidden]) { border-color: #e4e4ea !important; }
+.light .card {
+  background: #ffffff;
+  border-color: #e4e4ea;
+  box-shadow: 0 6px 20px rgba(28, 28, 32, 0.05);
+}
+.light .input { background: #ffffff; border-color: #d8d8e0; }
+.light .input:focus, .light input:focus, .light select:focus, .light textarea:focus {
+  border-color: #9933ff !important;
+  box-shadow: 0 0 0 3px rgba(153, 51, 255, 0.12);
+}
+.light .nav-pill:hover { background: #ececf0; }
+.light .nav-pill.active { background: rgba(153, 51, 255, 0.1); border-color: rgba(153, 51, 255, 0.35); color: #7c3aed; }
+.light .text-sky-400 { color: #7c3aed !important; }

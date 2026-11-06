@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: proofos
+      POSTGRES_PASSWORD: proofos
+      POSTGRES_DB: proofos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proofos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ../services/api
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://proofos:proofos@postgres:5432/proofos
+      OMNIROUTE_URL: http://omniroute:20128
+
+  omniroute:
+    image: diegosouzapw/omniroute:latest
+    restart: unless-stopped
+    profiles: ["ai"]
+    ports:
+      - "20128:20128"
+    volumes:
+      - omniroute-data:/app/data
+    environment:
+      OMNIROUTE_MEMORY_MB: 1024
+
+  proof:
+    build:
+      context: ../services/proof
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    ports:
+      - "8113:8113"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://proofos:proofos@postgres:5432/proofos
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+  meshcentral:
+    image: meshcentral/meshcentral:latest
+    restart: unless-stopped
+    ports:
+      - "8096:8086"
+      - "44330:44330"
+    volumes:
+      - meshcentral-data:/opt/meshcentral/meshcentral-data
+      - ./meshcentral/config.json:/opt/meshcentral/meshcentral-data/config.json:ro
+    environment:
+      - NODE_ENV=production
+
+volumes:
+  pgdata:
+  omniroute-data:
+  meshcentral-data:

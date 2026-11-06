@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Ylianst/MeshCentral/master/meshcentral-config-schema.json",
+  "settings": {
+    "cert": "proofos.local",
+    "LANonly": true,
+    "port": 8086,
+    "redirport": 8080,
+    "agentPort": 44330,
+    "aliasPort": 44330,
+    "mpsPort": 44330,
+    "selfupdate": false
+  },
+  "domains": {
+    "": {
+      "title": "ProofOS Remote",
+      "title2": "Open-source remote control",
+      "newAccounts": true
+    }
+  }
+}

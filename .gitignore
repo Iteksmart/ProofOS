@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+
+# Env / secrets
+.env
+.env.local
+keys-decrypted/
+
+# Test artifacts
+*.db
+*.sqlite3
+test_proofos.db
+test_proof_ledger.db
+
+# Playwright / E2E
+test-results/
+playwright-report/
+screens/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
