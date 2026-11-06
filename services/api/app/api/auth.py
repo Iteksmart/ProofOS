@@ -53,7 +53,7 @@ def get_org(org_id: int, db: Session = Depends(get_db), user=Depends(get_current
     org = db.query(Org).filter(Org.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="org not found")
-    if user.org_id != org_id and user.role not in {"admin", "manager"}:
+    if user.org_id != org_id:
         raise HTTPException(status_code=403, detail="org scope mismatch")
     return org
 

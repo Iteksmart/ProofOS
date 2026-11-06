@@ -32,6 +32,9 @@ CORS_ORIGINS=https://proofos.example.com
 On startup the API runs `Settings.validate_production()` and refuses to serve if
 `JWT_SECRET` is weak, `PROOF_SIGNING_SEED_HEX` is unset/short, or `AGENT_TOKEN`
 is empty. This is intentional — no silent weak-secret deployment.
+The standalone proof service also validates the signing seed and JWT secret and
+requires a valid control-plane JWT on every proof data endpoint. Both services must
+share the same JWT settings.
 
 ## 2. First-run bootstrap
 
@@ -80,7 +83,8 @@ Put it behind a TLS terminator (nginx/Caddy/ALB). The API sets
 
 - Fail-closed secret validation in production.
 - Bootstrap gated off in production; org/user creation now requires auth + role.
-- Per-device agent secrets (SHA-256, returned once at registration) + global `AGENT_TOKEN` fallback.
+- Per-device agent secrets (SHA-256, returned once at registration); `AGENT_TOKEN`
+  is limited to legacy devices without a per-device secret.
 - Proof records org-scoped (list/chain/verify/emit) + compliance export (`/v1/proof/export`) and report (`/v1/proof/report`).
 - Alert delivery via Slack webhook, SMTP email, or generic webhook (`docs`).
 - Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, CSP, Permissions-Policy, HSTS in prod).

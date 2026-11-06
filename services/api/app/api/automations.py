@@ -6,15 +6,20 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.proof import emit
 from app.core.security import actor_of, get_current_user
-from app.models.models import Automation
+from app.models.models import Automation, Script
 from app.schemas.schemas import AutomationCreate, AutomationOut, AutomationUpdate, SimulateIn
 from app.services.automation_engine import evaluate, simulate
 
 router = APIRouter()
 
 
+def _require_admin(user) -> None:
+    if user.role not in {"admin", "manager"}:
+        raise HTTPException(status_code=403, detail="admin/manager only")
+
+
 def _scope(user, org_id: int) -> None:
-    if user.org_id != org_id and user.role not in {"admin", "manager"}:
+    if user.org_id != org_id:
         raise HTTPException(status_code=403, detail="org scope mismatch")
 
 
@@ -26,7 +31,12 @@ def list_automations(org_id: int, db: Session = Depends(get_db), user=Depends(ge
 
 @router.post("", response_model=AutomationOut, status_code=201)
 def create_automation(payload: AutomationCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _require_admin(user)
     _scope(user, payload.org_id)
+    if payload.remediation_script_id is not None and not db.query(Script).filter(
+        Script.id == payload.remediation_script_id, Script.org_id == payload.org_id
+    ).first():
+        raise HTTPException(status_code=404, detail="script not found in organization")
     a = Automation(org_id=payload.org_id, name=payload.name, trigger=payload.trigger, action=payload.action, condition=payload.condition or "", autonomy=payload.autonomy, remediation_script_id=payload.remediation_script_id, enabled=True)
     db.add(a)
     db.commit()
@@ -44,6 +54,7 @@ def create_automation(payload: AutomationCreate, db: Session = Depends(get_db), 
 
 @router.patch("/{aid}/toggle", response_model=AutomationOut)
 def toggle_automation(aid: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _require_admin(user)
     a = db.query(Automation).filter(Automation.id == aid).first()
     if not a:
         raise HTTPException(status_code=404, detail="automation not found")
@@ -64,10 +75,15 @@ def toggle_automation(aid: int, db: Session = Depends(get_db), user=Depends(get_
 
 @router.patch("/{aid}", response_model=AutomationOut)
 def update_automation(aid: int, payload: AutomationUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _require_admin(user)
     a = db.query(Automation).filter(Automation.id == aid).first()
     if not a:
         raise HTTPException(status_code=404, detail="automation not found")
     _scope(user, a.org_id)
+    if payload.remediation_script_id is not None and not db.query(Script).filter(
+        Script.id == payload.remediation_script_id, Script.org_id == a.org_id
+    ).first():
+        raise HTTPException(status_code=404, detail="script not found in organization")
     for field in ("name", "trigger", "action", "condition", "autonomy", "remediation_script_id", "enabled"):
         val = getattr(payload, field)
         if val is not None:
@@ -87,6 +103,7 @@ def update_automation(aid: int, payload: AutomationUpdate, db: Session = Depends
 
 @router.post("/evaluate", status_code=201)
 def run_evaluate(org_id: int, trigger: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _require_admin(user)
     _scope(user, org_id)
     runs = evaluate(db, org_id, trigger, {"manual": True})
     return [{"id": r.id, "automation_id": r.automation_id, "trigger": r.trigger, "result": r.result} for r in runs]

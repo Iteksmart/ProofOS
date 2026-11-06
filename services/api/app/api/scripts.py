@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 def _scope(user, org_id: int) -> None:
-    if user.org_id != org_id and user.role not in {"admin", "manager"}:
+    if user.org_id != org_id:
         raise HTTPException(status_code=403, detail="org scope mismatch")
 
 
@@ -134,6 +134,8 @@ def get_script(script_id: int, db: Session = Depends(get_db), user=Depends(get_c
 
 @router.post("/{script_id}/runs", response_model=ScriptRunOut, status_code=201)
 def queue_run(script_id: int, device_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    if user.role not in {"admin", "manager"}:
+        raise HTTPException(status_code=403, detail="admin/manager only")
     kill_switch.require_disengaged(db)
     s = db.query(Script).filter(Script.id == script_id).first()
     if not s:

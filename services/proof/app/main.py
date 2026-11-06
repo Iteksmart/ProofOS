@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import check_db, get_db, init_db
 from app.models import ProofRecord
-from app.proof import emit, verify, verify_chain
+from app.proof import emit, record_org_id, verify, verify_chain
 from app.schemas import ProofEmitIn, ProofOut, ProofVerifyOut
 
 settings = get_settings()
@@ -21,6 +21,7 @@ log = logging.getLogger("proofos-proof")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.validate_production()
     init_db()
     log.info("ProofOS proof ledger ready db_ok=%s", check_db())
     yield
@@ -36,6 +37,23 @@ app.add_middleware(
 )
 
 
+def current_org_id(request: Request) -> int:
+    from jose import JWTError, jwt
+
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing Authorization: Bearer <token>")
+    token = header.split(" ", 1)[1].strip()
+    try:
+        claims = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algo])
+        org_id = int(claims["org_id"])
+        if not claims.get("sub"):
+            raise ValueError("missing subject")
+        return org_id
+    except (JWTError, KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
 @app.get("/health")
 def health():
     if check_db():
@@ -47,24 +65,26 @@ def health():
 
 
 @app.get("/v1/proof", response_model=list[ProofOut])
-def list_proofs(limit: int = Query(100, le=500), db: Session = Depends(get_db)):
-    return db.query(ProofRecord).order_by(ProofRecord.created_at.desc()).limit(limit).all()
+def list_proofs(limit: int = Query(100, le=500), org_id: int = Depends(current_org_id), db: Session = Depends(get_db)):
+    rows = db.query(ProofRecord).order_by(ProofRecord.created_at.desc()).all()
+    return [r for r in rows if record_org_id(r) == org_id][:limit]
 
 
 @app.get("/v1/proof/chain")
-def chain(db: Session = Depends(get_db)):
-    recs = db.query(ProofRecord).order_by(ProofRecord.created_at.asc()).limit(500).all()
+def chain(org_id: int = Depends(current_org_id), db: Session = Depends(get_db)):
+    rows = db.query(ProofRecord).order_by(ProofRecord.created_at.asc()).all()
+    recs = [r for r in rows if record_org_id(r) == org_id][-500:]
     return verify_chain(recs)
 
 
 @app.get("/v1/proof/verify/{rid}", response_model=ProofVerifyOut)
-def verify_proof(rid: str, db: Session = Depends(get_db)):
+def verify_proof(rid: str, org_id: int = Depends(current_org_id), db: Session = Depends(get_db)):
     rec = db.query(ProofRecord).filter(ProofRecord.id == rid).first()
-    if not rec:
+    if not rec or record_org_id(rec) != org_id:
         raise HTTPException(status_code=404, detail="receipt not found")
     return verify(rec)
 
 
 @app.post("/v1/proof/emit", response_model=ProofOut, status_code=201)
-def emit_proof(body: ProofEmitIn, db: Session = Depends(get_db)):
-    return emit(db, body.what, body.payload, body.who, body.where, body.why)
+def emit_proof(body: ProofEmitIn, org_id: int = Depends(current_org_id), db: Session = Depends(get_db)):
+    return emit(db, org_id, body.what, body.payload, body.who, body.where, body.why)

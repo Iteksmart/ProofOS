@@ -4,7 +4,7 @@ import json
 
 from sqlalchemy.orm import Session
 
-from app.models.models import Alert, Approval, Automation, AutomationRun, RemediationOutcome, ScriptRun, Ticket
+from app.models.models import Alert, Approval, Automation, AutomationRun, Device, RemediationOutcome, Script, ScriptRun, Ticket
 
 
 def _matches(condition: str, context: dict) -> bool:
@@ -110,7 +110,9 @@ def evaluate(db: Session, org_id: int, trigger: str, context: dict | None = None
 
         if a.action == "remediate":
             device_id = context.get("device_id")
-            if not (a.remediation_script_id and device_id):
+            device = db.query(Device).filter(Device.id == device_id, Device.org_id == org_id).first() if device_id else None
+            script = db.query(Script).filter(Script.id == a.remediation_script_id, Script.org_id == org_id).first() if a.remediation_script_id else None
+            if not (device and script):
                 result = "remediation skipped: missing script_id or device_id"
             elif a.autonomy == "manual":
                 db.add(

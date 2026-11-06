@@ -48,12 +48,13 @@ def test_full_flow(auth_client):
     r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-01", "os": "Linux", "ip": "10.0.0.1"})
     assert r.status_code == 201, r.text
     dev_id = r.json()["id"]
+    agent_headers = {"X-Agent-Token": r.json()["device_secret"]}
 
     r = client.get(f"/v1/devices?org_id={org_id}")
     assert r.status_code == 200
     assert len(r.json()) == 1
 
-    r = client.post(f"/v1/devices/{dev_id}/heartbeat", json={"cpu": 10.0, "disk": 20.0, "mem": 30.0, "status": "online"})
+    r = client.post(f"/v1/devices/{dev_id}/heartbeat", json={"cpu": 10.0, "disk": 20.0, "mem": 30.0, "status": "online"}, headers=agent_headers)
     assert r.status_code == 200
 
     r = client.post("/v1/tickets", json={"org_id": org_id, "title": "printer down", "body": "offline", "priority": "high"})
@@ -76,11 +77,11 @@ def test_full_flow(auth_client):
     assert r.status_code == 201, r.text
     run_id = r.json()["id"]
 
-    r = client.get(f"/v1/scripts/runs/pending?device_id={dev_id}")
+    r = client.get(f"/v1/scripts/runs/pending?device_id={dev_id}", headers=agent_headers)
     assert r.status_code == 200
     assert len(r.json()) == 1
 
-    r = client.post(f"/v1/scripts/runs/{run_id}/complete", json={"output": "hi", "exit_code": 0})
+    r = client.post(f"/v1/scripts/runs/{run_id}/complete", json={"output": "hi", "exit_code": 0}, headers=agent_headers)
     assert r.status_code == 200
 
     # Regression: GET /v1/scripts/runs must not be shadowed by GET /{script_id}
@@ -250,6 +251,9 @@ def test_proof_org_scoped(auth_client):
 
     r = client.get(f"/v1/proof/verify/{rid_b}")
     assert r.status_code == 403, r.text
+    r = client.get("/v1/proof/chain")
+    assert r.status_code == 200, r.text
+    assert r.json()["chain_ok"] is True
 
 
 def test_security_headers(client):
@@ -270,7 +274,7 @@ def test_device_metrics_history(auth_client):
     client, org_id, _ = auth_client
     r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-m", "os": "Linux", "ip": "10.0.0.9"})
     dev_id = r.json()["id"]
-    r = client.post(f"/v1/devices/{dev_id}/heartbeat", json={"cpu": 11.0, "disk": 22.0, "mem": 33.0, "status": "online"})
+    r = client.post(f"/v1/devices/{dev_id}/heartbeat", json={"cpu": 11.0, "disk": 22.0, "mem": 33.0, "status": "online"}, headers={"X-Agent-Token": r.json()["device_secret"]})
     assert r.status_code == 200
     r = client.get(f"/v1/devices/{dev_id}/metrics")
     assert r.status_code == 200, r.text
@@ -283,16 +287,35 @@ def test_script_run_get(auth_client):
     client, org_id, _ = auth_client
     r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-r", "os": "Linux", "ip": "10.0.0.9"})
     dev_id = r.json()["id"]
+    agent_headers = {"X-Agent-Token": r.json()["device_secret"]}
     r = client.post("/v1/scripts", json={"org_id": org_id, "name": "s-run", "body": "echo hi", "version": "1.0.0"})
     sid = r.json()["id"]
     r = client.post(f"/v1/scripts/{sid}/runs?device_id={dev_id}")
     run_id = r.json()["id"]
-    r = client.post(f"/v1/scripts/runs/{run_id}/complete", json={"output": "hi", "exit_code": 0})
+    r = client.post(f"/v1/scripts/runs/{run_id}/complete", json={"output": "hi", "exit_code": 0}, headers=agent_headers)
     r = client.get(f"/v1/scripts/runs/{run_id}")
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["output"] == "hi"
     assert body["script_name"] == "s-run"
+
+
+def test_script_run_requires_admin_or_manager(auth_client):
+    client, org_id, _ = auth_client
+    device = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-role", "os": "Linux", "ip": "10.0.0.9"}).json()
+    script = client.post("/v1/scripts", json={"org_id": org_id, "name": "role-check", "body": "echo hi"}).json()
+    created = client.post(
+        "/v1/auth/users",
+        json={"org_id": org_id, "email": "engineer@example.com", "password": "password123", "role": "engineer"},
+    )
+    assert created.status_code == 201, created.text
+    login = client.post("/v1/auth/login", json={"email": "engineer@example.com", "password": "password123"}).json()
+    r = client.post(
+        f"/v1/scripts/{script['id']}/runs",
+        params={"device_id": device["id"]},
+        headers={"Authorization": f"Bearer {login['access_token']}"},
+    )
+    assert r.status_code == 403
 
 
 def test_automation_condition(auth_client):
@@ -345,7 +368,7 @@ def test_device_token_auth(auth_client, monkeypatch):
     import app.core.security as sec
 
     client, org_id, _ = auth_client
-    # Enable agent auth (auth_enabled) via a configured global token.
+    # A device-scoped credential works; the global token cannot impersonate it.
     monkeypatch.setattr(sec.settings, "agent_token", "global")
     r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-tok", "os": "Linux", "ip": "10.0.0.9"})
     dev = r.json()
@@ -358,10 +381,37 @@ def test_device_token_auth(auth_client, monkeypatch):
 
     r = client.post(f"/v1/devices/{dev_id}/heartbeat", json={"status": "online"}, headers={"X-Agent-Token": secret})
     assert r.status_code == 200, r.text
-
     r = client.post(f"/v1/devices/{dev_id}/heartbeat", json={"status": "online"}, headers={"X-Agent-Token": "global"})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 401, r.text
 
+
+def test_agent_auth_fails_closed_without_token(auth_client):
+    client, org_id, _ = auth_client
+    r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-auth", "os": "Linux", "ip": "10.0.0.9"})
+    dev_id = r.json()["id"]
+    denied = client.get(f"/v1/scripts/runs/pending?device_id={dev_id}")
+    assert denied.status_code == 401
+    accepted = client.get(
+        f"/v1/scripts/runs/pending?device_id={dev_id}",
+        headers={"X-Agent-Token": r.json()["device_secret"]},
+    )
+    assert accepted.status_code == 200
+
+
+def test_tenant_admin_cannot_access_other_org(auth_client):
+    client, org_id, _ = auth_client
+    other = client.post("/v1/auth/bootstrap", json={"name": "Other Org"}).json()
+    other_org = other["org"]["id"]
+    other_token = other["access_token"]
+    created = client.post(
+        "/v1/devices",
+        json={"org_id": other_org, "hostname": "other-host", "os": "Linux", "ip": "10.0.0.2"},
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert created.status_code == 201
+    assert client.get(f"/v1/auth/orgs/{other_org}").status_code == 403
+    assert client.get(f"/v1/devices?org_id={other_org}").status_code == 403
+    assert client.get(f"/v1/devices/{created.json()['id']}").status_code == 403
 
 def test_compliance_export(auth_client):
     client, org_id, _ = auth_client
@@ -402,12 +452,13 @@ def test_device_command(auth_client):
     client, org_id, _ = auth_client
     r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-cmd", "os": "Linux", "ip": "10.0.0.9", "device_type": "workstation"})
     dev_id = r.json()["id"]
+    agent_headers = {"X-Agent-Token": r.json()["device_secret"]}
     r = client.post(f"/v1/devices/{dev_id}/command", json={"body": "echo hello", "description": "test"})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "queued"
     run_id = r.json()["run_id"]
 
-    r = client.get(f"/v1/scripts/runs/pending?device_id={dev_id}")
+    r = client.get(f"/v1/scripts/runs/pending?device_id={dev_id}", headers=agent_headers)
     assert r.status_code == 200
     assert any(j["id"] == run_id for j in r.json())
 
@@ -522,7 +573,7 @@ def test_status_sync_marks_offline(auth_client):
     client, org_id, _ = auth_client
     r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-sync", "os": "Linux", "ip": "10.0.0.9"})
     dev_id = r.json()["id"]
-    client.post(f"/v1/devices/{dev_id}/heartbeat", json={"status": "online"})
+    client.post(f"/v1/devices/{dev_id}/heartbeat", json={"status": "online"}, headers={"X-Agent-Token": r.json()["device_secret"]})
 
     db = SessionLocal()
     try:

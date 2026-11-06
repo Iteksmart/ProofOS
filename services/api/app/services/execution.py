@@ -4,16 +4,19 @@ from __future__ import annotations
 import json
 import time
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.proof import emit
-from app.models.models import Approval, Script, ScriptRun
+from app.models.models import Approval, Device, Script, ScriptRun
 from app.services import kill_switch
 
 
 def queue_command(db: Session, org_id: int, device_id: int, body: str, who: dict) -> ScriptRun:
     """Queue an ad-hoc shell command for a device's agent (via the script queue)."""
     kill_switch.require_disengaged(db)
+    if not db.query(Device).filter(Device.id == device_id, Device.org_id == org_id).first():
+        raise HTTPException(status_code=404, detail="device not found in organization")
     s = Script(org_id=org_id, name=f"adhoc-{int(time.time())}", body=body, version="1.0.0")
     db.add(s)
     db.flush()
@@ -41,10 +44,16 @@ def execute_approval(db: Session, approval: Approval) -> dict:
         run = queue_command(db, approval.org_id, payload.get("device_id"), payload.get("body", ""), who)
         return {"run_id": run.id}
     if approval.kind == "script":
+        device_id = payload.get("device_id")
+        script_id = payload.get("script_id")
+        if not db.query(Device).filter(Device.id == device_id, Device.org_id == approval.org_id).first():
+            raise HTTPException(status_code=404, detail="device not found in organization")
+        if not db.query(Script).filter(Script.id == script_id, Script.org_id == approval.org_id).first():
+            raise HTTPException(status_code=404, detail="script not found in organization")
         run = ScriptRun(
             org_id=approval.org_id,
-            device_id=payload.get("device_id"),
-            script_id=payload.get("script_id"),
+            device_id=device_id,
+            script_id=script_id,
             status="pending",
         )
         db.add(run)

@@ -125,28 +125,26 @@ def _agent_token_from_request(request: Request) -> str | None:
 def verify_agent(request: Request, db: Session, device_id: int | None = None) -> None:
     """Authenticate an agent call via a global AGENT_TOKEN or a per-device secret.
 
-    Precedence:
-      1. A configured AGENT_TOKEN always works (bootstrap/ops).
-      2. If the device has a secret_hash, the presented token must match it.
-      3. Auth is only enforced when AGENT_TOKEN is set or ENV=production;
-         otherwise (development/legacy) the endpoint is open.
+    New device credentials are device-scoped. The shared token is accepted only
+    for legacy devices without a per-device secret; unknown devices fail closed.
     """
     presented = _agent_token_from_request(request)
-    auth_enabled = bool(settings.agent_token) or settings.is_prod
-    if settings.agent_token and presented == settings.agent_token:
-        return
     if device_id is not None:
         from app.models.models import Device
 
         dev = db.query(Device).filter(Device.id == device_id).first()
-        if dev and dev.secret_hash:
+        if dev is not None and dev.secret_hash:
             if presented and hashlib.sha256(presented.encode()).hexdigest() == dev.secret_hash:
                 return
-            if auth_enabled:
-                raise HTTPException(status_code=401, detail="invalid device token")
-    if auth_enabled:
-        raise HTTPException(status_code=401, detail="invalid agent token")
-    # Development/legacy — no auth configured.
+            raise HTTPException(status_code=401, detail="invalid device token")
+        if settings.agent_token and presented == settings.agent_token:
+            return
+        if dev is None:
+            raise HTTPException(status_code=401, detail="unknown device")
+        raise HTTPException(status_code=401, detail="invalid device token")
+    if settings.agent_token and presented == settings.agent_token:
+        return
+    raise HTTPException(status_code=401, detail="invalid agent token")
 
 
 def require_agent(request: Request, db: Session = Depends(get_db)) -> None:

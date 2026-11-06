@@ -5,9 +5,11 @@ import hashlib
 import json
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -16,6 +18,25 @@ from app.models import ProofRecord
 settings = get_settings()
 
 _emit_lock = threading.Lock()
+
+
+@contextmanager
+def _chain_lock(db: Session):
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(20261106)"))
+        yield
+    else:
+        with _emit_lock:
+            yield
+
+
+def record_org_id(rec: ProofRecord) -> int | None:
+    try:
+        body = json.loads(base64.urlsafe_b64decode(rec.canonical_bytes))
+        org_id = body.get("where", {}).get("org_id")
+        return int(org_id) if org_id is not None else None
+    except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
+        return None
 
 
 def _get_seed_bytes() -> bytes:
@@ -44,21 +65,26 @@ def canonical(obj: dict) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str).encode()
 
 
-def emit(db: Session, what: str, payload: dict, who: dict, where: dict, why: dict) -> ProofRecord:
+def emit(db: Session, org_id: int, what: str, payload: dict, who: dict, where: dict, why: dict) -> ProofRecord:
     """Append a proof record. Raises on failure — never silent success."""
-    with _emit_lock:
+    with _chain_lock(db):
         now = datetime.now(timezone.utc)
+        scoped_where = dict(where or {})
+        scoped_where["org_id"] = org_id
         body = {
             "what": what,
             "when": now.isoformat(),
-            "where": where or {},
+            "where": scoped_where,
             "why": why or {},
             "who": who or {},
             "payload": payload or {},
         }
         cb = canonical(body)
         digest = hashlib.sha256(cb).hexdigest()
-        prev = db.query(ProofRecord).order_by(ProofRecord.created_at.desc()).first()
+        prev = next(
+            (r for r in db.query(ProofRecord).order_by(ProofRecord.created_at.desc()).all() if record_org_id(r) == org_id),
+            None,
+        )
         prev_hash = prev.payload_digest if prev else "0" * 64
         rec_id = uuid.uuid4().hex[:32]
         signature = get_signing_key().sign(cb + prev_hash.encode())

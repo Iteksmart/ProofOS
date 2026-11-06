@@ -26,11 +26,13 @@ class Settings(BaseSettings):
     api_env: str = os.getenv("ENV", "development")
     seed_demo: bool = os.getenv("SEED_DEMO", "false").lower() in {"1", "true", "yes"}
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    # Shared secret agents must present (X-Agent-Token / Bearer) for heartbeat +
-    # script queue/complete. Empty = agent auth disabled (development only).
+    # Legacy shared agent credential. New registrations use device-scoped secrets;
+    # this token is accepted only for devices without a per-device secret.
     agent_token: str = os.getenv("AGENT_TOKEN", "")
     # Allow unauthenticated /v1/auth/bootstrap (first-run org+admin creation).
-    allow_bootstrap: bool = os.getenv("ALLOW_BOOTSTRAP", "true").lower() in {"1", "true", "yes"}
+    allow_bootstrap: bool = os.getenv(
+        "ALLOW_BOOTSTRAP", "false" if os.getenv("ENV", "").lower() == "production" else "true"
+    ).lower() in {"1", "true", "yes"}
     # Optional webhook (Slack/Teams/generic) for monitor alert delivery.
     alert_webhook_url: str = os.getenv("ALERT_WEBHOOK_URL", "")
     alert_slack_webhook_url: str = os.getenv("ALERT_SLACK_WEBHOOK_URL", "")
@@ -94,8 +96,12 @@ class Settings(BaseSettings):
         problems: list[str] = []
         if self.jwt_secret.startswith("change-me") or len(self.jwt_secret) < 32:
             problems.append("JWT_SECRET must be a strong value (>=32 chars, not a placeholder)")
-        if len(self.proof_key_seed_hex.strip()) < 64:
-            problems.append("PROOF_SIGNING_SEED_HEX must be set (>=64 hex chars / 32 bytes)")
+        try:
+            seed = bytes.fromhex(self.proof_key_seed_hex.strip())
+        except ValueError:
+            seed = b""
+        if len(seed) != 32:
+            problems.append("PROOF_SIGNING_SEED_HEX must be exactly 64 valid hex chars / 32 bytes")
         if not self.agent_token:
             problems.append("AGENT_TOKEN must be set in production (agent auth)")
         if problems:

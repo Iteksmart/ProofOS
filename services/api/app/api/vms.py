@@ -49,7 +49,7 @@ COMMANDS = {
 
 
 def _scope(user, org_id: int) -> None:
-    if user.org_id != org_id and user.role not in {"admin", "manager"}:
+    if user.org_id != org_id:
         raise HTTPException(status_code=403, detail="org scope mismatch")
 
 

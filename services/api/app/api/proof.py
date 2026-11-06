@@ -25,14 +25,14 @@ def list_proofs(limit: int = Query(100, le=500), db: Session = Depends(get_db), 
 
 @router.get("/chain")
 def chain(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    recs = (
-        db.query(ProofRecord)
-        .filter(ProofRecord.org_id == user.org_id)
-        .order_by(ProofRecord.created_at.asc())
-        .limit(500)
-        .all()
-    )
-    return verify_chain(recs)
+    # The embedded ledger is one global chain. Verify its links using all
+    # records, but return only counts and broken IDs belonging to this tenant.
+    recs = db.query(ProofRecord).order_by(ProofRecord.created_at.asc()).limit(500).all()
+    result = verify_chain(recs)
+    own_ids = {rec.id for rec in recs if rec.org_id == user.org_id}
+    result["count"] = len(own_ids)
+    result["broken_ids"] = [rid for rid in result["broken_ids"] if rid in own_ids]
+    return result
 
 
 @router.get("/verify/{rid}", response_model=ProofVerifyOut)

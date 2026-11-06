@@ -15,5 +15,9 @@ python -m pip install -r requirements.txt
 python agent.py --api http://localhost:8000 --device-id 1
 ```
 
+Pass the one-time `device_secret` returned by device registration using
+`--token <device_secret>`. New devices always require their own secret; the shared
+`AGENT_TOKEN` is limited to legacy devices that do not yet have a per-device secret.
+
 ## Sellable alone
 `apps/agent/` is a standalone unit: pair it with any ProofOS-compatible API (no monolith required).
