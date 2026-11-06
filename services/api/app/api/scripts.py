@@ -10,6 +10,7 @@ from app.core.proof import emit
 from app.core.security import actor_of, agent_actor, get_current_user, require_agent, verify_agent
 from app.models.models import Device, Script, ScriptRun
 from app.schemas.schemas import RunComplete, ScriptCreate, ScriptOut, ScriptRunOut
+from app.services import kill_switch
 
 router = APIRouter()
 
@@ -133,6 +134,7 @@ def get_script(script_id: int, db: Session = Depends(get_db), user=Depends(get_c
 
 @router.post("/{script_id}/runs", response_model=ScriptRunOut, status_code=201)
 def queue_run(script_id: int, device_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    kill_switch.require_disengaged(db)
     s = db.query(Script).filter(Script.id == script_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="script not found")

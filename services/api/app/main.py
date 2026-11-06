@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api import ai, analytics, approvals, audits, auth, automations, changes, cmdb, consulting, devices, integrations, itechsmart, knowledge, mcp_registry, monitor, onboarding, patches, proof, push, remote, scripts, secrets, sso, tickets, time_tracking, vms
+from app.api import ai, analytics, approvals, audits, auth, automations, changes, cmdb, consulting, devices, integrations, itechsmart, knowledge, mcp_registry, monitor, onboarding, ops, patches, proof, push, remote, scripts, secrets, sso, tickets, time_tracking, vms
 from app.core import pubsub
 from app.core.config import get_settings
 from app.core.db import check_db, init_db
@@ -70,6 +70,8 @@ async def lifespan(app: FastAPI):
     status_sync.cancel()
 
 
+from app.services.kill_switch import KillSwitchEngaged
+
 app = FastAPI(title="ProofOS API", version="1.0.0", docs_url="/docs", lifespan=lifespan)
 
 
@@ -126,6 +128,13 @@ async def unhandled(request: Request, exc: Exception):
     from fastapi.responses import JSONResponse
 
     return JSONResponse(status_code=500, content={"ok": False, "error": "internal"})
+
+
+@app.exception_handler(KillSwitchEngaged)
+async def kill_switch_handler(request: Request, exc: Exception):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=409, content={"ok": False, "error": str(exc)})
 
 
 @app.get("/health")
@@ -211,6 +220,7 @@ app.include_router(remote.router, prefix="/v1/remote", tags=["remote"])
 app.include_router(patches.router, prefix="/v1/patches", tags=["patches"])
 app.include_router(push.router, prefix="/v1/push", tags=["push"])
 app.include_router(sso.router, prefix="/v1/sso", tags=["sso"])
+app.include_router(ops.router, prefix="/v1/ops", tags=["ops"])
 app.include_router(changes.router, prefix="/v1/changes", tags=["changes"])
 app.include_router(analytics.router, prefix="/v1/analytics", tags=["analytics"])
 app.include_router(integrations.router, prefix="/v1/integrations", tags=["integrations"])

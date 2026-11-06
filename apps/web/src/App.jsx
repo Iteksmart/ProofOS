@@ -119,7 +119,7 @@ export default function App() {
   const [enrolled, setEnrolled] = useState(null);
   const [newAutomation, setNewAutomation] = useState({ name: "", trigger: "ticket.opened", action: "notify", condition: "", remediation_script_id: "" });
   const [newCheck, setNewCheck] = useState({ device_id: "", kind: "port", target: "", threshold_ms: "" });
-  const [login, setLogin] = useState({ email: "admin@proofos.dev", password: "admin12345" });
+  const [login, setLogin] = useState({ email: "", password: "" });
 
   const [selDevice, setSelDevice] = useState(null);
   const [deviceMetrics, setDeviceMetrics] = useState([]);
@@ -492,7 +492,7 @@ export default function App() {
           {err && <p className="text-xs text-red-400 mt-3">{err}</p>}
           <button onClick={doLogin} className="w-full mt-4 bg-violet-600 hover:bg-violet-500 py-2 rounded font-semibold">Sign in</button>
           <a href={`${API}/v1/sso/google/login`} className="block w-full text-center mt-2 py-2 rounded font-semibold bg-slate-800 hover:bg-slate-700 text-sm">Sign in with Google</a>
-          <p className="text-xs text-slate-500 mt-3">First run: bootstrap creates an org + admin (admin-&lt;id&gt;@proofos.dev / admin12345). Proof ledger is hash-chained (Ed25519).</p>
+          <p className="text-xs text-slate-500 mt-3">First run: enter an org name to bootstrap — it creates an org + admin and returns a one-time password (shown once). Proof ledger is hash-chained (Ed25519).</p>
         </div>
       </div>
     );

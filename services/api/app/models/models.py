@@ -228,6 +228,16 @@ class PushDevice(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class KillSwitch(Base):
+    """Singleton row (id=1) for the emergency execution kill switch (fail-closed)."""
+
+    __tablename__ = "kill_switch"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    engaged: Mapped[bool] = mapped_column(Boolean, default=False)
+    reason: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class AutomationRun(Base):
     __tablename__ = "automation_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

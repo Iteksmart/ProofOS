@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets as _secrets
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -143,8 +145,11 @@ def bootstrap(payload: OrgCreate, db: Session = Depends(get_db)):
         )
     admin_email = f"admin-{org.id}@proofos.dev"
     user = db.query(User).filter(User.email == admin_email, User.org_id == org.id).first()
+    initial_password = None
     if not user:
-        user = User(org_id=org.id, email=admin_email, hashed_password=hash_password("admin12345"), role="admin")
+        # Random one-time admin password (shown once) instead of a predictable default.
+        initial_password = _secrets.token_urlsafe(16)
+        user = User(org_id=org.id, email=admin_email, hashed_password=hash_password(initial_password), role="admin")
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -157,4 +162,7 @@ def bootstrap(payload: OrgCreate, db: Session = Depends(get_db)):
             {"reason": "bootstrap admin"},
         )
     token = create_access_token(str(user.id), {"email": user.email, "role": user.role, "org_id": user.org_id})
-    return {"org": {"id": org.id, "name": org.name}, "user": _user_out(user), "access_token": token}
+    result: dict = {"org": {"id": org.id, "name": org.name}, "user": _user_out(user), "access_token": token}
+    if initial_password:
+        result["initial_password"] = initial_password  # shown once on first bootstrap only
+    return result

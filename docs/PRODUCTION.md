@@ -42,10 +42,10 @@ curl -X POST https://proofos.example.com/v1/auth/bootstrap \
   -H "Content-Type: application/json" -d '{"name":"Your Org"}'
 ```
 
-This creates the org plus `admin-<id>@proofos.dev / admin12345`. **Immediately
-change the admin password** (create a new admin or rotate), then set
-`ALLOW_BOOTSTRAP=false` and restart. Subsequent orgs/users are created through the
-authenticated `POST /v1/auth/orgs` and `POST /v1/auth/users` (admin/manager).
+This creates the org plus `admin-<id>@proofos.dev` and returns a **random one-time
+`initial_password`** (shown once, only on first bootstrap). **Rotate it immediately**
+and set `ALLOW_BOOTSTRAP=false` before restarting. Subsequent orgs/users are created
+through the authenticated `POST /v1/auth/orgs` and `POST /v1/auth/users` (admin/manager).
 
 ## 3. Deploy
 
@@ -64,9 +64,9 @@ Put it behind a TLS terminator (nginx/Caddy/ALB). The API sets
 
 ## 4. Operational notes
 
-- **Single API worker** — the proof chain uses an in-process lock + `prev_hash`
-  from the latest row. Run one `uvicorn` worker per instance (or move the chain
-  head to Postgres before scaling out). The ledger is still verifiable regardless.
+- **Multi-worker chain coordination** — the proof chain is serialized with a
+  PostgreSQL transaction-level advisory lock (`pg_advisory_xact_lock`), so multiple
+  API workers coordinate on the chain head safely. SQLite (dev) uses an in-process lock.
 - **Proof records are org-scoped** — `GET /v1/proof`, `/chain`, and `/verify/{id}`
   are filtered to the caller's org.
 - **No migrations** — `create_all` on boot is an MVP convenience. Add Alembic

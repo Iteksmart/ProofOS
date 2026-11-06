@@ -853,3 +853,33 @@ def test_push_register_and_status(auth_client):
     assert any(p["fcm_token"] == "e2e-fcm-token-123456789" for p in r.json())
     r = client.post(f"/v1/push/test?org_id={org_id}")
     assert r.status_code == 400, r.text  # FCM not configured in test env
+
+
+def test_bootstrap_random_password(client):
+    r = client.post("/v1/auth/bootstrap", json={"name": "Pw Org"})
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert "initial_password" in data
+    assert data["initial_password"] != "admin12345"
+    assert len(data["initial_password"]) >= 16
+
+
+def test_kill_switch_blocks_execution(auth_client):
+    client, org_id, _ = auth_client
+    r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ks-host", "os": "Linux", "ip": "10.0.0.9"})
+    dev_id = r.json()["id"]
+    r = client.post("/v1/scripts", json={"org_id": org_id, "name": "ks-script", "body": "echo hi"})
+    sid = r.json()["id"]
+    # engage
+    r = client.post("/v1/ops/kill-switch", json={"engaged": True, "reason": "test"})
+    assert r.status_code == 200, r.text
+    assert r.json()["engaged"] is True
+    # blocked
+    r = client.post(f"/v1/scripts/{sid}/run", params={"device_id": dev_id})
+    assert r.status_code == 409, r.text
+    # disengage
+    r = client.post("/v1/ops/kill-switch", json={"engaged": False, "reason": "test done"})
+    assert r.status_code == 200
+    # allowed again
+    r = client.post(f"/v1/scripts/{sid}/run", params={"device_id": dev_id})
+    assert r.status_code == 201, r.text

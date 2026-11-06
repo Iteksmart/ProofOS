@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     google_redirect_uri: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/v1/sso/google/callback")
     web_url: str = os.getenv("WEB_URL", "http://localhost:5173")
+    # Emergency execution kill switch (env override; "1" halts ALL agent execution immediately).
+    kill_switch: bool = os.getenv("KILL_SWITCH", "0").lower() in {"1", "true", "yes"}
     # Lightweight APM request tracing (off by default to avoid write amplification).
     apm_enabled: bool = os.getenv("APM_ENABLED", "false").lower() in {"1", "true", "yes"}
     # AI copilot backend: "heuristic" (deterministic, offline) | "omniroute" (LLM gateway) | "openrouter" (hosted LLM API).

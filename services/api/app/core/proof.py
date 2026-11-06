@@ -5,9 +5,11 @@ import hashlib
 import json
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -16,7 +18,21 @@ from app.models.models import ProofRecord
 
 settings = get_settings()
 
+# In-process lock for SQLite (single worker). Postgres uses a transactional
+# advisory lock so MULTIPLE API workers serialize on the chain head correctly.
 _emit_lock = threading.Lock()
+_CHAIN_LOCK_KEY = 20261106
+
+
+@contextmanager
+def _chain_lock(db: Session):
+    if (settings.database_url or "").startswith("sqlite"):
+        with _emit_lock:
+            yield
+    else:
+        # Transaction-level advisory lock; released automatically on commit.
+        db.execute(text(f"SELECT pg_advisory_xact_lock({_CHAIN_LOCK_KEY})"))
+        yield
 
 
 def _dev_seed() -> bytes:
@@ -63,7 +79,7 @@ def emit(
     why: dict,
 ) -> ProofRecord:
     """Append a proof record. Blocks (raises) if signing/DB fails — never silent success."""
-    with _emit_lock:
+    with _chain_lock(db):
         now = _now()
         body = {
             "what": what,

@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.core.proof import emit
 from app.models.models import Approval, Script, ScriptRun
+from app.services import kill_switch
 
 
 def queue_command(db: Session, org_id: int, device_id: int, body: str, who: dict) -> ScriptRun:
     """Queue an ad-hoc shell command for a device's agent (via the script queue)."""
+    kill_switch.require_disengaged(db)
     s = Script(org_id=org_id, name=f"adhoc-{int(time.time())}", body=body, version="1.0.0")
     db.add(s)
     db.flush()
@@ -32,6 +34,7 @@ def queue_command(db: Session, org_id: int, device_id: int, body: str, who: dict
 
 def execute_approval(db: Session, approval: Approval) -> dict:
     """Execute a pending approval's action. Assumes the approval is already committed."""
+    kill_switch.require_disengaged(db)
     payload = json.loads(approval.payload or "{}")
     who = {"actor_id": approval.decided_by or "approver", "actor_type": "user"}
     if approval.kind in {"command", "upgrade"}:
