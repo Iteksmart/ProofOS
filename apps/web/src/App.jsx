@@ -1,10 +1,22 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { HealthPill, ProofBadge } from "@proofos/ui";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// Production nginx proxies /v1 to the API, so an empty build value keeps all
+// browser traffic on the current origin. Local Vite dev keeps localhost:8000.
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 function token() {
   return localStorage.getItem("proofos_token") || "";
+}
+
+function tokenClaims(value) {
+  try {
+    const encoded = value.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = encoded + "=".repeat((4 - (encoded.length % 4)) % 4);
+    return JSON.parse(atob(padded));
+  } catch {
+    return {};
+  }
 }
 
 async function api(path, opts = {}) {
@@ -109,6 +121,8 @@ export default function App() {
   const [runs, setRuns] = useState([]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [setupCredentials, setSetupCredentials] = useState(null);
   const [search, setSearch] = useState("");
   const [verifyResult, setVerifyResult] = useState("");
   const [aiQuery, setAiQuery] = useState("Summarise offline devices");
@@ -134,6 +148,17 @@ export default function App() {
   const [deviceTypeFilter, setDeviceTypeFilter] = useState("");
   const [cmdBody, setCmdBody] = useState("");
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "engineer" });
+  const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
+  const [passwordNotice, setPasswordNotice] = useState("");
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetNotice, setResetNotice] = useState("");
+  const [resetError, setResetError] = useState("");
+  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get("password_reset") || "");
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
+  const [workspaceAdmin, setWorkspaceAdmin] = useState({ email: "", password: "" });
   const [proposeQuery, setProposeQuery] = useState("disk cleanup");
   const [audits, setAudits] = useState([]);
   const [auditKind, setAuditKind] = useState("full");
@@ -171,13 +196,20 @@ export default function App() {
   const [pushTokens, setPushTokens] = useState([]);
   const [pushToken, setPushToken] = useState("");
   const [pushResult, setPushResult] = useState(null);
+  const [enclaves, setEnclaves] = useState([]);
+  const [enclavePolicies, setEnclavePolicies] = useState([]);
+  const [newEnclave, setNewEnclave] = useState({ name: "Secure Workspace", device_id: "", policy_id: "" });
+  const [enclaveKey, setEnclaveKey] = useState(null);
+  const [dlpScan, setDlpScan] = useState({ text: "", result: null });
+  const [newPolicy, setNewPolicy] = useState({ name: "", blocked_apps: "", network_allowlist: "" });
+  const [killSwitch, setKillSwitch] = useState(null);
 
   const load = useCallback(async () => {
     if (!authToken) return;
     setLoading(true);
     setErr("");
     try {
-      const [d, t, p, a, m, al, s, ap, u, au] = await Promise.all([
+      const [d, t, p, a, m, al, s, ap, u, au, k, an] = await Promise.all([
         api(`/v1/devices?org_id=${orgId}`),
         api(`/v1/tickets?org_id=${orgId}`),
         api(`/v1/proof`),
@@ -188,6 +220,8 @@ export default function App() {
         api(`/v1/approvals?org_id=${orgId}`).catch(() => []),
         api(`/v1/auth/users?org_id=${orgId}`).catch(() => []),
         api(`/v1/audits?org_id=${orgId}`).catch(() => []),
+        api(`/v1/ops/kill-switch`).catch(() => ({ engaged: false })),
+        api(`/v1/analytics/anomalies?org_id=${orgId}`).catch(() => []),
       ]);
       setDevices(Array.isArray(d) ? d : []);
       setTickets(Array.isArray(t) ? t : []);
@@ -199,6 +233,8 @@ export default function App() {
       setApprovals(Array.isArray(ap) ? ap : []);
       setUsers(Array.isArray(u) ? u : []);
       setAudits(Array.isArray(au) ? au : []);
+      setKillSwitch(k);
+      setAnomalies(Array.isArray(an) ? an : []);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -215,14 +251,13 @@ export default function App() {
     localStorage.setItem("proofos_theme", theme);
   }, [theme]);
 
-  // Google SSO callback hands back the token via ?sso_token=...
+  // Google SSO returns the token in the URL fragment so it is not sent in HTTP requests.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(window.location.hash.slice(1));
     const ssoToken = params.get("sso_token");
     if (ssoToken) {
-      localStorage.setItem("proofos_token", ssoToken);
-      window.history.replaceState({}, document.title, window.location.pathname);
-      setAuthToken(ssoToken);
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+      activateSession(ssoToken);
     }
   }, []);
 
@@ -232,8 +267,10 @@ export default function App() {
     let ws;
     let timer;
     try {
-      const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${API.replace(/^https?:\/\//, "")}/v1/ws/events?token=${authToken}`);
+      const wsUrl = new URL("/v1/ws/events", API || window.location.origin);
+      wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+      wsUrl.searchParams.set("token", authToken);
+      ws = new WebSocket(wsUrl);
       ws.onmessage = () => {
         clearTimeout(timer);
         timer = setTimeout(load, 300);
@@ -247,31 +284,162 @@ export default function App() {
     };
   }, [authToken, orgId, load]);
 
-  async function doLogin() {
+  async function activateSession(accessToken) {
+    const claims = tokenClaims(accessToken);
+    const sessionOrgId = Number(claims.org_id);
+    localStorage.setItem("proofos_token", accessToken);
+    if (Number.isInteger(sessionOrgId) && sessionOrgId > 0) {
+      localStorage.setItem("proofos_org", String(sessionOrgId));
+      setOrgId(sessionOrgId);
+      try {
+        const response = await fetch(`${API}/v1/auth/orgs/${sessionOrgId}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (response.ok) {
+          const org = await response.json();
+          localStorage.setItem("proofos_orgname", org.name);
+          setOrgName(org.name);
+        }
+      } catch {
+        // Session remains usable when the optional org-name lookup is unavailable.
+      }
+    }
+    setAuthToken(accessToken);
+  }
+
+  async function doLogin(event) {
+    event?.preventDefault();
     setErr("");
-    const r = await fetch(`${API}/v1/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(login),
-    });
-    const j = await r.json();
-    if (j.access_token) {
-      localStorage.setItem("proofos_token", j.access_token);
-      setAuthToken(j.access_token);
-      setTimeout(load, 200);
-    } else {
-      const b = await fetch(`${API}/v1/auth/bootstrap`, {
+    setAuthBusy(true);
+    try {
+      const response = await fetch(`${API}/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: orgName }),
+        body: JSON.stringify(login),
       });
-      const bj = await b.json();
-      if (bj.access_token) {
-        localStorage.setItem("proofos_token", bj.access_token);
-        localStorage.setItem("proofos_org", String(bj.org.id));
-        setOrgId(bj.org.id);
-        setAuthToken(bj.access_token);
-      } else setErr("login failed: " + JSON.stringify(j));
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.access_token) {
+        setErr(response.status === 401 ? "Email or password is incorrect." : (result.detail || "Sign-in failed. Please try again."));
+        return;
+      }
+      await activateSession(result.access_token);
+    } catch {
+      setErr("Could not reach the ProofOS server. Check that the API is running, then try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function requestPasswordReset(event) {
+    event?.preventDefault();
+    setResetError("");
+    setResetNotice("");
+    setResetBusy(true);
+    try {
+      const response = await fetch(`${API}/v1/auth/password/reset-request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: resetEmail.trim() }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || "Could not request a password reset.");
+      setResetNotice(result.detail || "If an account matches that email, a password reset link will be sent.");
+    } catch (e) {
+      setResetError(e.message || "Could not reach the ProofOS server. Try again later.");
+    } finally {
+      setResetBusy(false);
+    }
+  }
+
+  async function completePasswordReset(event) {
+    event?.preventDefault();
+    setResetError("");
+    setResetNotice("");
+    if (resetPassword.length < 12) {
+      setResetError("Choose a new password with at least 12 characters.");
+      return;
+    }
+    if (resetPassword !== resetPasswordConfirm) {
+      setResetError("The passwords do not match.");
+      return;
+    }
+    setResetBusy(true);
+    try {
+      const response = await fetch(`${API}/v1/auth/password/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: resetToken, new_password: resetPassword }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || "This reset link is invalid or expired.");
+      setResetNotice(result.detail || "Password updated. You can now sign in.");
+      setLogin((current) => ({ ...current, password: "" }));
+      setResetPassword("");
+      setResetPasswordConfirm("");
+      setResetToken("");
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+    } catch (e) {
+      setResetError(e.message || "Could not reset the password. Request a new link and try again.");
+    } finally {
+      setResetBusy(false);
+    }
+  }
+
+  async function doBootstrap() {
+    const workspaceName = orgName.trim();
+    if (workspaceName.length < 2) {
+      setErr("Enter a workspace name with at least 2 characters.");
+      return;
+    }
+    if (!workspaceAdmin.email.trim() || workspaceAdmin.password.length < 12) {
+      setErr("Enter an administrator email and a password with at least 12 characters.");
+      return;
+    }
+    setErr("");
+    setAuthBusy(true);
+    try {
+      const response = await fetch(`${API}/v1/auth/bootstrap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: workspaceName, email: workspaceAdmin.email.trim(), password: workspaceAdmin.password }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.access_token) {
+        setErr(result.detail || "Workspace setup failed. Please try another name or sign in.");
+        return;
+      }
+      setOrgName(result.org.name);
+      setLogin({ email: result.user.email, password: result.initial_password || "" });
+      setSetupCredentials(result.initial_password ? { email: result.user.email, password: result.initial_password } : null);
+      await activateSession(result.access_token);
+    } catch {
+      setErr("Could not reach the ProofOS server. Check that the API is running, then try again.");
+    } finally {
+      setAuthBusy(false);
+      setWorkspaceAdmin((current) => ({ ...current, password: "" }));
+    }
+  }
+
+  async function changePassword() {
+    setErr("");
+    setPasswordNotice("");
+    if (passwordForm.new_password.length < 12) {
+      setErr("Choose a new password with at least 12 characters.");
+      return;
+    }
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      setErr("The new passwords do not match.");
+      return;
+    }
+    try {
+      await api("/v1/auth/password", {
+        method: "POST",
+        body: JSON.stringify({ current_password: passwordForm.current_password || null, new_password: passwordForm.new_password }),
+      });
+      setPasswordForm({ current_password: "", new_password: "", confirm_password: "" });
+      setPasswordNotice("Password updated. Use it next time you sign in with email and password.");
+    } catch (error) {
+      setErr(error.message);
     }
   }
 
@@ -450,6 +618,12 @@ export default function App() {
   }
   async function loadPatches() { try { setPatches(await api(`/v1/patches?org_id=${orgId}`)); } catch { setPatches([]); } }
   async function loadPush() { try { setPushTokens(await api(`/v1/push?org_id=${orgId}`)); } catch { setPushTokens([]); } }
+  async function loadEnclaves() {
+    try {
+      const [e, p] = await Promise.all([api(`/v1/enclaves?org_id=${orgId}`), api(`/v1/enclaves/policies?org_id=${orgId}`)]);
+      setEnclaves(e); setEnclavePolicies(p);
+    } catch { setEnclaves([]); setEnclavePolicies([]); }
+  }
   async function loadIts() {
     try {
       const [s, t, c] = await Promise.all([
@@ -478,21 +652,78 @@ export default function App() {
     if (view === "vms") loadVms();
     if (view === "patches") loadPatches();
     if (view === "admin") loadPush();
+    if (view === "enclaves") loadEnclaves();
   }, [view]);
+
+  if (!authToken && resetToken) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+        <section className="bg-slate-900 border border-slate-800 p-7 rounded-2xl w-full max-w-md shadow-2xl shadow-black/30" aria-labelledby="reset-title">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl gradient-bar flex items-center justify-center text-white font-black">P</div>
+            <div><h1 id="reset-title" className="text-2xl font-bold">Choose a new password</h1><p className="text-xs text-slate-400 mt-1">Your reset link expires after 20 minutes.</p></div>
+          </div>
+          <form onSubmit={completePasswordReset} className="space-y-4">
+            <Field label="New password"><input type="password" autoComplete="new-password" minLength={12} className={inputCls} value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} required /></Field>
+            <Field label="Confirm new password"><input type="password" autoComplete="new-password" minLength={12} className={inputCls} value={resetPasswordConfirm} onChange={(e) => setResetPasswordConfirm(e.target.value)} required /></Field>
+            {resetError && <p role="alert" className="text-sm text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{resetError}</p>}
+            <button type="submit" disabled={resetBusy} className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-60 py-2.5 rounded-lg font-semibold">{resetBusy ? "Updating password…" : "Update password"}</button>
+          </form>
+          {resetNotice && <p role="status" className="text-sm text-emerald-300 mt-4">{resetNotice} <button type="button" className="underline underline-offset-4" onClick={() => { setResetNotice(""); window.history.replaceState({}, document.title, window.location.pathname + window.location.search); }}>Return to sign in</button></p>}
+        </section>
+      </div>
+    );
+  }
 
   if (!authToken) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-sm">
-          <h1 className="text-2xl font-bold">ProofOS</h1>
-          <p className="text-sm text-slate-400 mt-1">RMM · Monitoring · Ticketing · Automation · Proof · AI</p>
-          <Field label="Email"><input className={inputCls} value={login.email} onChange={(e) => setLogin({ ...login, email: e.target.value })} /></Field>
-          <Field label="Password"><input type="password" className={inputCls} value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} /></Field>
-          <Field label="Org name"><input className={inputCls} value={orgName} onChange={(e) => setOrgName(e.target.value)} /></Field>
-          {err && <p className="text-xs text-red-400 mt-3">{err}</p>}
-          <button onClick={doLogin} className="w-full mt-4 bg-violet-600 hover:bg-violet-500 py-2 rounded font-semibold">Sign in</button>
-          <a href={`${API}/v1/sso/google/login`} className="block w-full text-center mt-2 py-2 rounded font-semibold bg-slate-800 hover:bg-slate-700 text-sm">Sign in with Google</a>
-          <p className="text-xs text-slate-500 mt-3">First run: enter an org name to bootstrap — it creates an org + admin and returns a one-time password (shown once). Proof ledger is hash-chained (Ed25519).</p>
+        <div className="bg-slate-900 border border-slate-800 p-7 rounded-2xl w-full max-w-md shadow-2xl shadow-black/30">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl gradient-bar flex items-center justify-center text-white font-black">P</div>
+            <div><h1 className="text-2xl font-bold">Proof<span className="gradient-text">OS</span></h1><p className="text-xs text-slate-500 mt-1">Operations with an audit trail</p></div>
+          </div>
+          <form onSubmit={doLogin}>
+            <div className="space-y-3">
+              <Field label="Email"><input type="email" autoComplete="username" className={inputCls} value={login.email} onChange={(e) => setLogin({ ...login, email: e.target.value })} required /></Field>
+              <div>
+                <div className="flex items-center justify-between mb-1"><label htmlFor="login-password" className="text-xs text-slate-400">Password</label><button type="button" onClick={() => { setResetEmail(login.email); setResetError(""); setResetNotice(""); setForgotOpen(true); }} className="text-xs text-violet-300 hover:text-violet-200 underline underline-offset-4">Forgot password?</button></div>
+                <input id="login-password" type="password" autoComplete="current-password" className={inputCls} value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} required />
+              </div>
+            </div>
+            {err && <p role="alert" className="text-sm text-red-300 mt-4 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{err}</p>}
+            <button type="submit" disabled={authBusy} className="w-full mt-5 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 py-2.5 rounded-lg font-semibold">{authBusy ? "Signing in…" : "Sign in"}</button>
+          </form>
+          {resetNotice && !forgotOpen && <p role="status" className="text-sm text-emerald-300 mt-4">{resetNotice}</p>}
+          <div className="relative my-4 text-center"><span className="bg-slate-900 px-2 text-xs text-slate-500">or continue with</span><div className="absolute inset-x-0 top-1/2 -z-0 border-t border-slate-800" /></div>
+          <a href={`${API}/v1/sso/google/login`} className="flex items-center justify-center gap-2.5 w-full py-2.5 rounded-lg font-semibold bg-slate-800 hover:bg-slate-700 text-sm border border-slate-700/70" aria-label="Continue with Google">
+            <svg aria-hidden="true" viewBox="0 0 48 48" className="w-5 h-5"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.1h6.6c3.9-3.6 6.1-8.8 6.1-15Z"/><path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.6-5.1c-1.8 1.2-4 2-6.9 2-5.3 0-9.8-3.6-11.4-8.4H5.8v5.3A20 20 0 0 0 24 44Z"/><path fill="#FBBC05" d="M12.6 27.6a12 12 0 0 1 0-7.2v-5.3H5.8a20 20 0 0 0 0 17.8l6.8-5.3Z"/><path fill="#EA4335" d="M24 12c3 0 5.7 1 7.8 3.1l5.8-5.8C34.1 6 29.5 4 24 4A20 20 0 0 0 5.8 15.1l6.8 5.3C14.2 15.6 18.7 12 24 12Z"/></svg>
+            Continue with Google
+          </a>
+          <details className="mt-5 border-t border-slate-800 pt-4">
+            <summary className="list-none cursor-pointer rounded-xl border border-slate-700 bg-slate-800/70 hover:bg-slate-800 px-4 py-3.5 flex items-center justify-between gap-3 transition-colors">
+              <span><span className="block text-sm font-semibold text-slate-100">New to ProofOS?</span><span className="block text-xs text-slate-400 mt-1">Create a company workspace and administrator account</span></span>
+              <span className="shrink-0 rounded-lg bg-violet-600 hover:bg-violet-500 px-3 py-2 text-xs font-semibold text-white">Create workspace</span>
+            </summary>
+            <div className="mt-3">
+              <Field label="Workspace name"><input className={inputCls} value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Your company name" minLength={2} maxLength={255} /></Field>
+              <Field label="Administrator email"><input type="email" autoComplete="email" className={inputCls} value={workspaceAdmin.email} onChange={(e) => setWorkspaceAdmin({ ...workspaceAdmin, email: e.target.value })} placeholder="you@company.com" required /></Field>
+              <Field label="Administrator password"><input type="password" autoComplete="new-password" minLength={12} className={inputCls} value={workspaceAdmin.password} onChange={(e) => setWorkspaceAdmin({ ...workspaceAdmin, password: e.target.value })} placeholder="At least 12 characters" required /></Field>
+              <p className="text-xs text-slate-400 mt-2">Creates an isolated workspace with the administrator login you choose. Existing workspaces cannot be claimed through setup.</p>
+              <button type="button" onClick={doBootstrap} disabled={authBusy} className="w-full mt-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 py-2.5 rounded-lg font-semibold">{authBusy ? "Creating workspace…" : "Create workspace and sign in"}</button>
+            </div>
+          </details>
+          {forgotOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setForgotOpen(false); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="forgot-title" className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+              <div className="flex items-start justify-between gap-4"><div><h2 id="forgot-title" className="text-lg font-semibold text-slate-100">Reset your password</h2><p className="text-sm text-slate-400 mt-1">We’ll email a secure, short-lived reset link if the account exists.</p></div><button type="button" aria-label="Close" onClick={() => setForgotOpen(false)} className="text-slate-400 hover:text-white">✕</button></div>
+              <form onSubmit={requestPasswordReset} className="mt-5">
+                <Field label="Account email"><input type="email" autoComplete="email" className={inputCls} value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} required /></Field>
+                {resetError && <p role="alert" className="text-sm text-red-300 mt-3 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{resetError}</p>}
+                {resetNotice && <p role="status" className="text-sm text-emerald-300 mt-3">{resetNotice}</p>}
+                <div className="flex gap-3 mt-5"><button type="button" onClick={() => setForgotOpen(false)} className="flex-1 btn-ghost rounded-lg py-2.5 font-medium">Back to sign in</button><button type="submit" disabled={resetBusy} className="flex-1 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 rounded-lg py-2.5 font-semibold">{resetBusy ? "Sending…" : "Send reset link"}</button></div>
+              </form>
+            </section>
+          </div>}
         </div>
       </div>
     );
@@ -523,33 +754,63 @@ export default function App() {
     ["monitor", "Monitor"], ["scripts", "Scripts"], ["automations", "Automations"],
     ["proof", "Proof"], ["ai", "AI Copilot"], ["admin", "Admin"],
     ["cmdb", "CMDB"], ["knowledge", "Knowledge"], ["vault", "Vault"], ["changes", "Changes"], ["time", "Time"],
-    ["vms", "VMs"], ["patches", "Patches"], ["itechsmart", "iTechSmart"],
+    ["vms", "VMs"], ["patches", "Patches"], ["enclaves", "Workspaces"], ["itechsmart", "iTechSmart"],
     ["audit", "Audit"], ["onboarding", "Onboarding"], ["consulting", "Consulting"],
   ];
+  const navGroups = [
+    { label: "Workspace", ids: ["dash", "analytics"] },
+    { label: "Operations", ids: ["devices", "monitor", "tickets", "scripts", "automations", "vms", "patches"] },
+    { label: "Governance", ids: ["proof", "audit", "changes", "vault"] },
+    { label: "Service delivery", ids: ["knowledge", "cmdb", "time", "onboarding", "consulting"] },
+    { label: "Platform", ids: ["ai", "admin", "itechsmart"] },
+  ].map((group) => ({ ...group, items: group.ids.map((id) => nav.find(([key]) => key === id)).filter(Boolean) }));
+  const emptyWorkspace = devices.length === 0 && tickets.length === 0;
 
   return (
     <div className="min-h-screen app-bg text-slate-100">
-      <header className="sticky top-0 z-20 border-b border-slate-800/60 px-6 py-3 flex flex-wrap items-center gap-3 backdrop-blur-xl bg-slate-950/60">
+      <header className="sticky top-0 z-20 border-b border-slate-800/60 px-4 md:px-6 py-3 flex flex-wrap items-center gap-3 backdrop-blur-xl bg-slate-950/90">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl gradient-bar flex items-center justify-center font-black text-white shadow-lg shadow-violet-500/25">P</div>
           <h1 className="text-lg font-extrabold tracking-tight">Proof<span className="gradient-text">OS</span></h1>
         </div>
-        <span className="text-[11px] bg-violet-500/10 text-violet-300 px-2.5 py-1 rounded-full border border-violet-500/20 font-medium">RMM · Proof · AI</span>
-        <span className="text-xs text-slate-500 font-medium">org {orgId} · {orgName}</span>
-        <nav className="ml-auto flex flex-wrap gap-1">
-          {nav.map(([v, label]) => (
-            <button key={v} onClick={() => setView(v)} className={`nav-pill px-3 py-1.5 text-[13px] font-medium ${view === v ? "active" : "text-slate-400"}`}>{label}</button>
-          ))}
-          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="nav-pill px-3 py-1.5 text-[13px] text-slate-400" title="Toggle theme">{theme === "dark" ? "☀ Light" : "🌙 Dark"}</button>
-          <button onClick={load} className="nav-pill px-3 py-1.5 text-[13px] text-slate-400">Refresh</button>
-          <button onClick={() => { localStorage.removeItem("proofos_token"); setAuthToken(""); }} className="nav-pill px-3 py-1.5 text-[13px] text-red-400">Logout</button>
-        </nav>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold truncate">{orgName}</p>
+          <p className="text-[11px] text-slate-500">Operations workspace · org {orgId}</p>
+        </div>
+        <div className="ml-auto flex items-center gap-1">
+          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="nav-pill px-3 py-2 text-xs text-slate-400" title="Toggle theme">{theme === "dark" ? "☀ Light" : "🌙 Dark"}</button>
+          <button onClick={load} className="nav-pill px-3 py-2 text-xs text-slate-400">Refresh</button>
+          <button onClick={() => { localStorage.removeItem("proofos_token"); setAuthToken(""); setSetupCredentials(null); }} className="nav-pill px-3 py-2 text-xs text-red-400">Logout</button>
+        </div>
       </header>
 
-      {err && <div className="mx-6 mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">{err}</div>}
-      {loading && <div className="mx-6 mt-3 text-xs text-slate-500">loading…</div>}
+      {setupCredentials && <section role="status" className="mx-4 md:mx-6 mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="text-sm font-semibold text-amber-200">Save your one-time administrator login</h2><p className="text-xs text-slate-300 mt-1">This generated password is shown only now. Store it in your password manager.</p></div>
+          <button onClick={() => setSetupCredentials(null)} className="text-xs text-slate-400 hover:text-white">Dismiss</button>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm">
+          <div><span className="text-xs text-slate-500 block">Email</span><code>{setupCredentials.email}</code></div>
+          <div><span className="text-xs text-slate-500 block">One-time password</span><code className="select-all break-all">{setupCredentials.password}</code></div>
+        </div>
+        <button onClick={() => navigator.clipboard?.writeText(`${setupCredentials.email}\n${setupCredentials.password}`)} className="mt-3 btn-ghost rounded-lg px-3 py-1.5 text-xs">Copy login details</button>
+      </section>}
+      {err && <div role="alert" className="mx-4 md:mx-6 mt-3 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">{err}</div>}
+      {loading && <div role="status" className="mx-4 md:mx-6 mt-3 text-xs text-slate-500">Loading workspace…</div>}
 
-      <main className="p-6 grid gap-6">
+      <div className="lg:flex lg:items-start">
+        <aside aria-label="Main navigation" className="hidden lg:flex lg:sticky lg:top-[65px] lg:h-[calc(100vh-65px)] lg:w-60 lg:shrink-0 lg:flex-col lg:overflow-y-auto border-r border-slate-800/60 bg-slate-950/30 px-3 py-5">
+          {navGroups.map((group) => <section key={group.label} className="mb-5">
+            <h2 className="px-3 mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{group.label}</h2>
+            <div className="grid gap-1">{group.items.map(([id, label]) => <button key={id} aria-current={view === id ? "page" : undefined} onClick={() => setView(id)} className={`nav-pill w-full px-3 py-2 text-left text-sm font-medium ${view === id ? "active" : "text-slate-400"}`}>{label}</button>)}</div>
+          </section>)}
+          <p className="mt-auto px-3 pt-4 text-[10px] leading-relaxed text-slate-600">ProofOS · audited operations</p>
+        </aside>
+        <div className="min-w-0 flex-1">
+          <nav aria-label="Mobile navigation" className="lg:hidden border-b border-slate-800/60 px-4 py-2 overflow-x-auto">
+            <div className="flex w-max gap-1">{nav.map(([id, label]) => <button key={id} aria-current={view === id ? "page" : undefined} onClick={() => setView(id)} className={`nav-pill whitespace-nowrap px-3 py-2 text-xs font-medium ${view === id ? "active" : "text-slate-400"}`}>{label}</button>)}</div>
+          </nav>
+          <main className="p-4 md:p-6 grid gap-6">
         {view === "dash" && (
           <>
             <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -565,6 +826,18 @@ export default function App() {
               <button onClick={() => setDashMode("operations")} className={`px-3 py-1.5 rounded-lg text-xs ${dashMode === "operations" ? "bg-slate-700" : "bg-slate-900 hover:bg-slate-800"}`}>⚙ Operations view</button>
               <button onClick={() => setDashMode("executive")} className={`px-3 py-1.5 rounded-lg text-xs ${dashMode === "executive" ? "bg-slate-700" : "bg-slate-900 hover:bg-slate-800"}`}>📊 Executive view</button>
             </div>
+            {emptyWorkspace && <section className="card p-5 md:p-6 flex flex-wrap items-center justify-between gap-5 border-violet-500/20">
+              <div className="max-w-2xl">
+                <p className="text-[10px] uppercase tracking-[0.16em] font-bold text-violet-300">Your workspace is ready</p>
+                <p className="mt-2 text-lg font-semibold text-slate-100">Start with the work you need to manage</p>
+                <p className="mt-2 text-sm text-slate-400">Register a device to begin monitoring, create a ticket for a service request, or run an audit to see the current governance baseline.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setView("devices")} className="bg-violet-600 px-4 py-2 rounded-lg text-sm font-semibold">Add first device</button>
+                <button onClick={() => setView("tickets")} className="btn-ghost px-4 py-2 rounded-lg text-sm">Create ticket</button>
+                <button onClick={() => setView("audit")} className="btn-ghost px-4 py-2 rounded-lg text-sm">Run audit</button>
+              </div>
+            </section>}
             {dashMode === "executive" && (
               <div className="card p-4">
                 <h2 className="font-semibold mb-2">Executive summary</h2>
@@ -712,7 +985,7 @@ export default function App() {
             {enrolled && (
               <Panel title={`Device enrolled · ${enrolled.hostname}`} onClose={() => setEnrolled(null)}>
                 <p className="text-sm text-slate-300 mb-2">Install the agent with this one-time secret (copy it now):</p>
-                <pre className="text-xs bg-slate-950 border border-slate-800 rounded p-3 overflow-auto mb-2">{`python agent.py --api ${API} --device-id ${enrolled.id} --token ${enrolled.device_secret}`}</pre>
+                <pre className="text-xs bg-slate-950 border border-slate-800 rounded p-3 overflow-auto mb-2">{`python agent.py --api ${API || window.location.origin} --device-id ${enrolled.id} --token ${enrolled.device_secret}`}</pre>
                 <p className="text-xs text-slate-500">The secret is shown once; rotate it anytime from the device detail.</p>
               </Panel>
             )}
@@ -892,6 +1165,16 @@ export default function App() {
                 ))}
                 {alerts.length === 0 && <p className="text-sm text-slate-500">No alerts.</p>}
               </div>
+              <div className="card p-4">
+                <h2 className="font-semibold mb-2">Anomalies</h2>
+                {anomalies.map((a) => (
+                  <div key={a.id} className="text-xs py-1 border-b border-slate-800 flex justify-between items-center gap-2">
+                    <span><HealthPill status={a.severity || "elevated"} /> · {a.kind || "anomaly"} · {a.target || a.device_id || "system"}</span>
+                    <span className="text-slate-500">{a.score || 0}/100</span>
+                  </div>
+                ))}
+                {anomalies.length === 0 && <p className="text-sm text-slate-500">No anomalies detected.</p>}
+              </div>
             </div>
           </>
         )}
@@ -1064,8 +1347,27 @@ export default function App() {
               <Stat label="Pending approvals" value={approvals.filter((a) => a.status === "pending").length} sub="human-gated" />
               <Stat label="Users" value={users.length} sub="org members" />
               <Stat label="Tickets" value={tickets.length} sub="total" />
+              <Stat label="Kill switch" value={killSwitch ? (killSwitch.engaged ? "ENGAGED" : "off") : "—"} sub={killSwitch?.engaged ? "all automations frozen" : "normal ops"} />
             </section>
             <div className="grid md:grid-cols-2 gap-4">
+              <div className="card p-4">
+                <h2 className="font-semibold mb-2">Kill switch (global automation freeze)</h2>
+                <p className="text-xs text-slate-500 mb-3">When engaged, all script runs and automation remediations are blocked. Engagement is proof-logged.</p>
+                <button
+                  onClick={async () => {
+                    try {
+                      await api("/v1/ops/kill-switch", { method: "POST", body: "{}" });
+                      const ks = await api("/v1/ops/kill-switch");
+                      setKillSwitch(ks);
+                      setErr(ks.engaged ? "Kill switch ENGAGED — all automations frozen" : "Kill switch disengaged");
+                    } catch (e) { setErr(e.message); }
+                  }}
+                  className={`w-full px-4 py-2 rounded-lg text-sm font-semibold ${killSwitch?.engaged ? "bg-red-600 hover:bg-red-500" : "bg-violet-600 hover:bg-violet-500"}`}
+                >
+                  {killSwitch?.engaged ? "Disengage kill switch" : "Engage kill switch"}
+                </button>
+                {killSwitch?.reason && <p className="text-xs text-slate-400 mt-2">Reason: {killSwitch.reason}</p>}
+              </div>
               <div className="card p-4">
                 <h2 className="font-semibold mb-2">Approvals (human-gated)</h2>
                 {approvals.length === 0 && <p className="text-sm text-slate-500">No approvals yet — AI/automation proposals appear here.</p>}
@@ -1098,6 +1400,17 @@ export default function App() {
                 {users.map((u) => <div key={u.id} className="text-xs py-1 flex justify-between"><span>{u.email}</span><span className="text-slate-500">{u.role}</span></div>)}
                 {users.length === 0 && <p className="text-sm text-slate-500">No users.</p>}
               </div>
+            </div>
+            <div className="card p-4">
+              <h2 className="font-semibold mb-2">My sign-in password</h2>
+              <p className="text-xs text-slate-500 mb-3">Set a local password after Google sign-in or workspace setup. Password sign-ins must provide the current password.</p>
+              <div className="grid md:grid-cols-3 gap-2">
+                <input type="password" autoComplete="current-password" className={inputCls} placeholder="Current password (if signing in with password)" value={passwordForm.current_password} onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })} />
+                <input type="password" autoComplete="new-password" className={inputCls} placeholder="New password (12+ characters)" value={passwordForm.new_password} onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })} />
+                <input type="password" autoComplete="new-password" className={inputCls} placeholder="Confirm new password" value={passwordForm.confirm_password} onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })} />
+              </div>
+              <button onClick={changePassword} className="mt-3 bg-violet-600 px-4 py-2 rounded-lg text-sm font-semibold">Update password</button>
+              {passwordNotice && <p role="status" className="text-sm text-emerald-400 mt-2">{passwordNotice}</p>}
             </div>
             <div className="card p-4">
               <h2 className="font-semibold mb-2">Inventory by device type</h2>
@@ -1472,7 +1785,75 @@ export default function App() {
             </Table>
           </>
         )}
+            {view === "enclaves" && (
+          <>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="card p-4">
+                <h2 className="font-semibold mb-3">Provision secure workspace</h2>
+                <p className="text-xs text-slate-500 mb-3">Company-controlled encrypted enclave on any Mac/PC. Work data runs under IT policy + DLP; personal apps stay private (BYOD, no VDI).</p>
+                <div className="grid gap-2">
+                  <input className={inputCls} placeholder="Workspace name" value={newEnclave.name} onChange={(e) => setNewEnclave({ ...newEnclave, name: e.target.value })} />
+                  <select className={inputCls} value={newEnclave.device_id} onChange={(e) => setNewEnclave({ ...newEnclave, device_id: e.target.value })}>
+                    <option value="">— device —</option>
+                    {devices.map((d) => <option key={d.id} value={d.id}>{d.hostname}</option>)}
+                  </select>
+                  <select className={inputCls} value={newEnclave.policy_id} onChange={(e) => setNewEnclave({ ...newEnclave, policy_id: e.target.value })}>
+                    <option value="">— policy (optional) —</option>
+                    {enclavePolicies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <button className="btn-primary px-3 py-2 rounded text-sm font-semibold" onClick={async () => {
+                    const j = await api(`/v1/enclaves`, { method: "POST", body: JSON.stringify({ org_id: orgId, name: newEnclave.name, device_id: Number(newEnclave.device_id), policy_id: Number(newEnclave.policy_id) || null }) });
+                    setEnclaveKey(j.enclave_key);
+                    loadEnclaves();
+                  }}>Provision workspace</button>
+                  {enclaveKey && <div className="text-xs bg-slate-950 border border-slate-800 rounded p-2 break-all">Enclave key (shown once — store it with the agent): <code>{enclaveKey}</code></div>}
+                </div>
+              </div>
+              <div className="card p-4">
+                <h2 className="font-semibold mb-3">DLP scan</h2>
+                <p className="text-xs text-slate-500 mb-3">Paste content to detect sensitive data (SSN, cards, API keys) before it leaves the enclave.</p>
+                <input className={inputCls} placeholder="Paste content to scan…" value={dlpScan.text} onChange={(e) => setDlpScan({ ...dlpScan, text: e.target.value })} />
+                <button className="btn-ghost px-3 py-2 rounded text-sm mt-2" onClick={async () => { setDlpScan({ ...dlpScan, result: await api(`/v1/enclaves/scan`, { method: "POST", body: JSON.stringify({ text: dlpScan.text }) }) }); }}>Scan</button>
+                {dlpScan.result && <pre className="text-xs text-slate-400 mt-2 bg-slate-950 rounded p-2 break-all">{JSON.stringify(dlpScan.result, null, 2)}</pre>}
+              </div>
+            </div>
+            <div className="card p-4">
+              <h2 className="font-semibold mb-3">IT policies (DLP)</h2>
+              <div className="grid md:grid-cols-4 gap-2">
+                <input className={inputCls} placeholder="Policy name" value={newPolicy.name} onChange={(e) => setNewPolicy({ ...newPolicy, name: e.target.value })} />
+                <input className={inputCls} placeholder='blocked apps JSON ["dropbox"]' value={newPolicy.blocked_apps} onChange={(e) => setNewPolicy({ ...newPolicy, blocked_apps: e.target.value })} />
+                <input className={inputCls} placeholder='network allowlist JSON ["acme.com"]' value={newPolicy.network_allowlist} onChange={(e) => setNewPolicy({ ...newPolicy, network_allowlist: e.target.value })} />
+                <button className="btn-primary px-3 py-2 rounded text-sm" onClick={async () => {
+                  await api(`/v1/enclaves/policies`, { method: "POST", body: JSON.stringify({ ...newPolicy, allowed_apps: "[]", blocked_apps: newPolicy.blocked_apps || "[]", network_allowlist: newPolicy.network_allowlist || "[]", dlp_rules: "{}", clipboard_enabled: false, watermark_enabled: true, ai_governed: true }) });
+                  setNewPolicy({ name: "", blocked_apps: "", network_allowlist: "" });
+                  loadEnclaves();
+                }}>Create policy</button>
+              </div>
+              <div className="mt-3 text-xs text-slate-400">
+                {enclavePolicies.map((p) => <div key={p.id} className="py-1 flex justify-between"><span>{p.name}</span><span className="text-slate-500">apps {JSON.parse(p.blocked_apps || "[]").length} blocked · network {JSON.parse(p.network_allowlist || "[]").length} allow · AI {p.ai_governed ? "governed" : "open"}</span></div>)}
+                {enclavePolicies.length === 0 && <p className="text-slate-500">No policies yet.</p>}
+              </div>
+            </div>
+            <Table head={["ID", "Workspace", "Device", "Policy", "Status", "Actions"]}>
+              {enclaves.map((e) => (
+                <tr key={e.id}>
+                  <td className="px-4 py-3 text-slate-500">#{e.id}</td>
+                  <td className="px-4 py-3">{e.name}</td>
+                  <td className="px-4 py-3">{e.device_id}</td>
+                  <td className="px-4 py-3">{e.policy_id || "—"}</td>
+                  <td className="px-4 py-3"><HealthPill status={e.status} /></td>
+                  <td className="px-4 py-3 flex gap-2 text-xs">
+                    {e.status !== "suspended" && <button className="text-amber-400 hover:underline" onClick={async () => { await api(`/v1/enclaves/${e.id}`, { method: "PATCH", body: JSON.stringify({ status: "suspended" }) }); loadEnclaves(); }}>Suspend</button>}
+                    {e.status === "suspended" && <button className="text-emerald-400 hover:underline" onClick={async () => { await api(`/v1/enclaves/${e.id}`, { method: "PATCH", body: JSON.stringify({ status: "active" }) }); loadEnclaves(); }}>Resume</button>}
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          </>
+        )}
       </main>
+        </div>
+      </div>
     </div>
   );
 }

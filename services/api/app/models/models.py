@@ -238,6 +238,54 @@ class KillSwitch(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class EnclavePolicy(Base):
+    """DLP / IT policy governing a secure workspace (app allowlist, network, DLP rules)."""
+
+    __tablename__ = "enclave_policies"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    allowed_apps: Mapped[str] = mapped_column(Text, default="[]")  # JSON list
+    blocked_apps: Mapped[str] = mapped_column(Text, default="[]")  # JSON list
+    network_allowlist: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of domains/CIDRs
+    dlp_rules: Mapped[str] = mapped_column(Text, default="{}")  # JSON: {"patterns":[...], "block_clipboard":bool}
+    clipboard_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    watermark_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    ai_governed: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class SecureEnclave(Base):
+    """A company-controlled, encrypted secure workspace provisioned on an endpoint."""
+
+    __tablename__ = "secure_enclaves"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    policy_id: Mapped[int | None] = mapped_column(ForeignKey("enclave_policies.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), default="Secure Workspace")
+    status: Mapped[str] = mapped_column(String(20), default="provisioning", index=True)  # provisioning|active|suspended|removed
+    encryption_key_id: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class EnclaveEvent(Base):
+    """A DLP / policy event reported by the secure-workspace agent."""
+
+    __tablename__ = "enclave_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    enclave_id: Mapped[int] = mapped_column(ForeignKey("secure_enclaves.id"), index=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(40), index=True)  # dlp_blocked|app_blocked|network_blocked|policy_violation|ai_usage|provisioned
+    severity: Mapped[str] = mapped_column(String(20), default="info")  # info|warning|critical
+    detail: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
 class AutomationRun(Base):
     __tablename__ = "automation_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -260,6 +308,20 @@ class ProofRecord(Base):
     signing_key_id: Mapped[str] = mapped_column(String(100), default="ed25519:proofos-1")
     anchored: Mapped[bool] = mapped_column(Boolean, default=False)
     anchor_commitment: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class StandaloneProofRecord(Base):
+    """Schema mirror for the independently operated proof ledger service."""
+
+    __tablename__ = "proof_ledger_records"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    what: Mapped[str] = mapped_column(String(100), index=True)
+    canonical_bytes: Mapped[str] = mapped_column(Text)
+    payload_digest: Mapped[str] = mapped_column(String(64), index=True)
+    prev_hash: Mapped[str] = mapped_column(String(64))
+    signature: Mapped[str] = mapped_column(Text)
+    signing_key_id: Mapped[str] = mapped_column(String(100), default="ed25519:proofos-1")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 

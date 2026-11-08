@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 
 # Workspace manifests first (cache-friendly, enables @proofos/ui resolution)
@@ -15,7 +15,7 @@ RUN npm install
 COPY apps/web apps/web
 COPY packages/ui packages/ui
 
-ARG VITE_API_URL=http://localhost:8000
+ARG VITE_API_URL=
 ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build --workspace @proofos/web
 

@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api import ai, analytics, approvals, audits, auth, automations, changes, cmdb, consulting, devices, integrations, itechsmart, knowledge, mcp_registry, monitor, onboarding, ops, patches, proof, push, remote, scripts, secrets, sso, tickets, time_tracking, vms
+from app.api import ai, analytics, approvals, audits, auth, automations, changes, cmdb, consulting, devices, enclaves, integrations, itechsmart, knowledge, mcp_registry, monitor, onboarding, ops, patches, proof, push, remote, scripts, secrets, sso, tickets, time_tracking, vms
 from app.core import pubsub
 from app.core.config import get_settings
 from app.core.db import check_db, init_db
@@ -26,6 +26,12 @@ log = logging.getLogger("proofos")
 _ws_subscribers: dict[WebSocket, int | None] = {}
 
 
+def _events_for_org(events: list[dict], org_id: int | None) -> list[dict]:
+    if org_id is None:
+        return []
+    return [event for event in events if event.get("org_id") == org_id]
+
+
 async def _broadcast_loop() -> None:
     while True:
         await asyncio.sleep(0.5)
@@ -33,7 +39,9 @@ async def _broadcast_loop() -> None:
         if not events:
             continue
         for ws, ws_org in list(_ws_subscribers.items()):
-            relevant = [e for e in events if ws_org is None or e.get("org_id") is None or e.get("org_id") == ws_org]
+            # Tenant events must never fall through to every connected client.
+            # Events without an org are intentionally omitted from tenant feeds.
+            relevant = _events_for_org(events, ws_org)
             if not relevant:
                 continue
             try:
@@ -72,7 +80,14 @@ async def lifespan(app: FastAPI):
 
 from app.services.kill_switch import KillSwitchEngaged
 
-app = FastAPI(title="ProofOS API", version="1.0.0", docs_url="/docs", lifespan=lifespan)
+app = FastAPI(
+    title="ProofOS API",
+    version="1.0.0",
+    docs_url=None if settings.is_prod else "/docs",
+    redoc_url=None if settings.is_prod else "/redoc",
+    openapi_url=None if settings.is_prod else "/openapi.json",
+    lifespan=lifespan,
+)
 
 
 class LogMiddleware(BaseHTTPMiddleware):
@@ -187,6 +202,8 @@ async def ws_events(ws: WebSocket):
     try:
         claims = decode_token(token)
         org_id = claims.get("org_id")
+        if not isinstance(org_id, int) or org_id < 1 or not claims.get("sub"):
+            raise ValueError("missing user or organization claim")
     except Exception:
         await ws.close(code=1008)
         return
@@ -221,6 +238,7 @@ app.include_router(patches.router, prefix="/v1/patches", tags=["patches"])
 app.include_router(push.router, prefix="/v1/push", tags=["push"])
 app.include_router(sso.router, prefix="/v1/sso", tags=["sso"])
 app.include_router(ops.router, prefix="/v1/ops", tags=["ops"])
+app.include_router(enclaves.router, prefix="/v1/enclaves", tags=["enclaves"])
 app.include_router(changes.router, prefix="/v1/changes", tags=["changes"])
 app.include_router(analytics.router, prefix="/v1/analytics", tags=["analytics"])
 app.include_router(integrations.router, prefix="/v1/integrations", tags=["integrations"])

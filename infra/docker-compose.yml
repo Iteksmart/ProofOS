@@ -1,24 +1,28 @@
 services:
   postgres:
     image: postgres:15-alpine
+    restart: unless-stopped
+    networks: [data]
     environment:
-      POSTGRES_USER: proofos
-      POSTGRES_PASSWORD: proofos
-      POSTGRES_DB: proofos
+      POSTGRES_USER: ${POSTGRES_USER:-proofos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-proofos}
+      POSTGRES_DB: ${POSTGRES_DB:-proofos}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U proofos"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-proofos} -d ${POSTGRES_DB:-proofos}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    networks: [data]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -26,69 +30,97 @@ services:
       retries: 10
 
   api:
+    restart: unless-stopped
+    networks:
+      web: {}
+      data: {}
+      ai: {}
     build:
       context: ../services/api
       dockerfile: Dockerfile
     env_file:
       - ../.env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg://proofos:proofos@postgres:5432/proofos
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-proofos}:${POSTGRES_PASSWORD:-proofos}@postgres:5432/${POSTGRES_DB:-proofos}
       OMNIROUTE_URL: http://omniroute:20128
+      TRUSTED_PROXY_IPS: ${PROOFOS_WEB_PROXY_IP:-172.31.240.2}
 
   omniroute:
     image: diegosouzapw/omniroute:latest
     restart: unless-stopped
+    networks: [ai]
     profiles: ["ai"]
     ports:
-      - "20128:20128"
+      - "127.0.0.1:20128:20128"
     volumes:
       - omniroute-data:/app/data
     environment:
       OMNIROUTE_MEMORY_MB: 1024
 
   proof:
+    restart: unless-stopped
+    networks: [data]
     build:
       context: ../services/proof
       dockerfile: Dockerfile
     env_file:
       - ../.env
     ports:
-      - "8113:8113"
+      - "127.0.0.1:8113:8113"
     depends_on:
-      postgres:
+      api:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg://proofos:proofos@postgres:5432/proofos
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-proofos}:${POSTGRES_PASSWORD:-proofos}@postgres:5432/${POSTGRES_DB:-proofos}
 
   web:
+    restart: unless-stopped
+    networks:
+      web: {}
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
       args:
-        VITE_API_URL: http://localhost:8000
+        VITE_API_URL: ${VITE_API_URL:-}
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   meshcentral:
-    image: meshcentral/meshcentral:latest
+    image: ${MESHCENTRAL_IMAGE:-meshcentral/meshcentral:latest}
     restart: unless-stopped
+    networks: [meshcentral]
     ports:
-      - "8096:8086"
-      - "44330:44330"
+      - "${MESHCENTRAL_WEB_BIND_IP:-127.0.0.1}:8096:8086"
+      - "${MESHCENTRAL_AGENT_BIND_IP:-127.0.0.1}:44330:44330"
     volumes:
       - meshcentral-data:/opt/meshcentral/meshcentral-data
       - ./meshcentral/config.json:/opt/meshcentral/meshcentral-data/config.json:ro
     environment:
       - NODE_ENV=production
+
+networks:
+  web:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${PROOFOS_WEB_SUBNET:-172.31.240.0/24}
+  data:
+    driver: bridge
+    internal: true
+  ai:
+    driver: bridge
+  meshcentral:
+    driver: bridge
 
 volumes:
   pgdata:

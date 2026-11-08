@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
+from urllib.parse import urlsplit
+from sqlalchemy.engine import make_url
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _parse_origins(raw: str) -> list[str]:
@@ -12,7 +15,35 @@ def _parse_origins(raw: str) -> list[str]:
     return parts or ["http://localhost:5173"]
 
 
+def _is_https_origin(value: str) -> bool:
+    parsed = urlsplit(value.strip())
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and not parsed.username
+        and not parsed.password
+        and parsed.path in ("", "/")
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _find_repo_env_file() -> Path | None:
+    """Find the repository .env in a checkout; containers use injected env vars."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / ".env"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 class Settings(BaseSettings):
+    # Load the repository-level local environment file regardless of whether the
+    # API is launched from the repo root or services/api.
+    model_config = SettingsConfigDict(
+        env_file=_find_repo_env_file(),
+        extra="ignore",
+    )
     database_url: str = os.getenv(
         "DATABASE_URL",
         "postgresql+psycopg://proofos:proofos@localhost:5432/proofos",
@@ -29,7 +60,7 @@ class Settings(BaseSettings):
     # Legacy shared agent credential. New registrations use device-scoped secrets;
     # this token is accepted only for devices without a per-device secret.
     agent_token: str = os.getenv("AGENT_TOKEN", "")
-    # Allow unauthenticated /v1/auth/bootstrap (first-run org+admin creation).
+    # Allow one-time anonymous setup of a brand-new workspace; existing names are rejected.
     allow_bootstrap: bool = os.getenv(
         "ALLOW_BOOTSTRAP", "false" if os.getenv("ENV", "").lower() == "production" else "true"
     ).lower() in {"1", "true", "yes"}
@@ -102,8 +133,36 @@ class Settings(BaseSettings):
             seed = b""
         if len(seed) != 32:
             problems.append("PROOF_SIGNING_SEED_HEX must be exactly 64 valid hex chars / 32 bytes")
-        if not self.agent_token:
-            problems.append("AGENT_TOKEN must be set in production (agent auth)")
+        if len(self.agent_token) < 32 or any(marker in self.agent_token.lower() for marker in ("change-me", "replace-with", "example")):
+            problems.append("AGENT_TOKEN must be a random secret with at least 32 characters")
+        if self.database_url.startswith("sqlite"):
+            problems.append("DATABASE_URL must use PostgreSQL in production")
+        else:
+            try:
+                database_password = make_url(self.database_url).password or ""
+            except Exception:
+                database_password = ""
+            password_lower = database_password.lower()
+            if (
+                len(database_password) < 24
+                or password_lower in {"proofos", "postgres", "password"}
+                or any(marker in password_lower for marker in ("change-me", "replace-with", "example"))
+            ):
+                problems.append("DATABASE_URL must use a strong PostgreSQL password (at least 24 characters)")
+        if "*" in self.cors_origins:
+            problems.append("CORS_ORIGINS must not contain a wildcard in production")
+        elif any(not _is_https_origin(origin) for origin in self.cors_origins):
+            problems.append("Every CORS_ORIGINS entry must be an HTTPS origin without a path")
+        if not _is_https_origin(self.web_url):
+            problems.append("WEB_URL must be an HTTPS origin without a path in production")
+        if self.jwt_algo != "HS256":
+            problems.append("JWT_ALGO must be HS256")
+        if bool(self.google_client_id) != bool(self.google_client_secret):
+            problems.append("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together")
+        if self.google_client_id:
+            parsed_redirect = urlsplit(self.google_redirect_uri.strip())
+            if parsed_redirect.scheme != "https" or not parsed_redirect.hostname:
+                problems.append("GOOGLE_REDIRECT_URI must be an absolute HTTPS URL in production")
         if problems:
             raise ValueError("; ".join(problems))
 
@@ -113,10 +172,6 @@ class Settings(BaseSettings):
         if v == "change-me-in-production-min-32-chars" and os.getenv("ENV", "").lower() == "production":
             raise ValueError("JWT_SECRET must be set in production")
         return v
-
-    class Config:
-        extra = "ignore"
-
 
 @lru_cache
 def get_settings() -> Settings:

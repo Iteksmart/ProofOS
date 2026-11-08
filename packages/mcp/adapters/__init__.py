@@ -3,6 +3,7 @@ from .azure import AzureAdapter
 from .google_workspace import GoogleWorkspaceAdapter
 from .microsoft365 import Microsoft365Adapter
 from .vmware import VmwareAdapter
+from .base import AdapterConfigurationError, VendorAdapter
 
 ADAPTERS = {
     "microsoft365": Microsoft365Adapter,
@@ -13,6 +14,7 @@ ADAPTERS = {
 }
 
 __all__ = [
+    "AdapterConfigurationError",
     "VendorAdapter",
     "Microsoft365Adapter",
     "GoogleWorkspaceAdapter",

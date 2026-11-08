@@ -29,6 +29,7 @@ test_proof_ledger.db
 test-results/
 playwright-report/
 screens/
+.playwright-mcp/
 
 # OS / editors
 .DS_Store

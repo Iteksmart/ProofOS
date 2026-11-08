@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -35,6 +35,12 @@ def get_db():
 def init_db() -> None:
     import app.models  # noqa: F401
 
+    if settings.api_env.lower() == "production":
+        if not inspect(engine).has_table("proof_ledger_records"):
+            raise RuntimeError(
+                "proof_ledger_records is missing; apply the ProofOS API Alembic migrations before starting the proof service."
+            )
+        return
     Base.metadata.create_all(bind=engine)
 
 

@@ -53,6 +53,8 @@ docker compose -f infra/docker-compose.yml up --build
 # Agents:    see apps/agent/README.md
 ```
 
+For production, use the hardened overlay and checklist in [docs/PRODUCTION.md](docs/PRODUCTION.md).
+
 ### Run without Docker (dev)
 ```powershell
 cd D:\proofos\services\api
@@ -76,7 +78,7 @@ See `docs/PRODUCTION.md` (deploy checklist) and `docs/SECURITY.md` (threat model
 - [x] Agent (inventory + heartbeat + run script + remote command, proof-logged exec)
 - [x] Proof ledger + verify UI (embedded `/v1/proof` + standalone `services/proof` on `:8113`) + compliance export/report
 - [x] AI copilot (MCP tools: device/ticket/proof/monitor/script/approval; LLM backends: heuristic | OpenRouter | OmniRoute — `docs/AI-BACKENDS.md`)
-- [x] Vendor connectors (MCP adapters: M365, Google Workspace, AWS, Azure, VMware — stubs) + MCP tool registry (`/v1/mcp/tools`)
+- [x] Vendor connectors (MCP adapters: Microsoft Graph, Google Workspace Admin Directory, AWS EC2, Azure Resource Manager, VMware vCenter) + MCP tool registry (`/v1/mcp/tools`)
 - [x] CI + tests (backend pytest w/ coverage gate, frontend Vitest + Testing Library)
 - [x] Production hardening (fail-closed secrets, agent auth, org-scoped proof, security headers, rate limiting, nginx web, non-root, healthchecks)
 - [ ] SNMP OID polling · interactive PTY terminal · live vendor API calls — see roadmap

@@ -51,7 +51,7 @@ def run_audit(db: Session, org_id: int, kind: str) -> tuple[list[dict], float]:
             c.add("security", "info", "No devices registered", "Onboard endpoints to begin monitoring.")
 
     if "compliance" in want:
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)  # naive UTC to match DB `due_at`
         breached = [t for t in tickets if t.due_at and t.due_at < now and t.status not in {"closed", "cancelled"}]
         if breached:
             c.add("compliance", "high", f"{len(breached)} ticket(s) breached SLA", ", ".join(f"#{t.id} {t.title}" for t in breached[:5]))

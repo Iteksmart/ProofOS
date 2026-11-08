@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.proof import emit
-from app.core.security import actor_of, get_current_user
+from app.core.security import actor_of, require_role
 from app.models.models import ProofRecord
 from app.services import itechsmart
 
@@ -13,25 +13,31 @@ router = APIRouter()
 
 
 @router.get("/status")
-def status(user=Depends(get_current_user)):
+def status(user=Depends(require_role("admin", "manager"))):
     """Live health probe of all local iTechSmart UAIO services."""
     return itechsmart.probe()
 
 
 @router.get("/tools")
-def tools(user=Depends(get_current_user)):
+def tools(user=Depends(require_role("admin", "manager"))):
     """List iTechSmart MCP tools (live)."""
-    return itechsmart.mcp_tools()
+    try:
+        return itechsmart.mcp_tools()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"iTechSmart MCP unreachable: {e}")
 
 
 @router.get("/chain")
-def chain(user=Depends(get_current_user)):
+def chain(user=Depends(require_role("admin", "manager"))):
     """Fetch the ProofLink Plus receipt chain (live)."""
-    return itechsmart.chain()
+    try:
+        return itechsmart.chain()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"ProofLink Plus unreachable: {e}")
 
 
 @router.post("/mcp/call")
-def mcp_call(body: dict, user=Depends(get_current_user)):
+def mcp_call(body: dict, user=Depends(require_role("admin", "manager"))):
     """Invoke an iTechSmart MCP tool (requires ITECHSMART_API_KEY)."""
     tool = body.get("tool") or body.get("name")
     if not tool:
@@ -40,7 +46,7 @@ def mcp_call(body: dict, user=Depends(get_current_user)):
 
 
 @router.post("/seal")
-def seal(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def seal(body: dict, db: Session = Depends(get_db), user=Depends(require_role("admin", "manager"))):
     """Bridge: seal a ProofOS receipt on iTechSmart ProofLink Plus (needs ITECHSMART_API_KEY)."""
     rid = body.get("proof_id")
     if not rid:

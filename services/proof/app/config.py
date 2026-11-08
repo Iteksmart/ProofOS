@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -33,6 +35,33 @@ class Settings(BaseSettings):
             raise ValueError("PROOF_SIGNING_SEED_HEX must be valid hex") from exc
         if len(seed) != 32:
             raise ValueError("PROOF_SIGNING_SEED_HEX must be exactly 64 hex chars / 32 bytes")
+        if self.jwt_algo != "HS256":
+            raise ValueError("JWT_ALGO must be HS256")
+        if "*" in self.cors_origins:
+            raise ValueError("CORS_ORIGINS must not contain a wildcard in production")
+        for origin in self.cors_origins:
+            parsed = urlsplit(origin.strip())
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.path not in ("", "/")
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("Every CORS_ORIGINS entry must be an HTTPS origin without a path")
+        if self.database_url.startswith("sqlite"):
+            raise ValueError("DATABASE_URL must use PostgreSQL in production")
+        try:
+            password = make_url(self.database_url).password or ""
+        except Exception:
+            password = ""
+        lowered = password.lower()
+        if len(password) < 24 or lowered in {"proofos", "postgres", "password"} or any(
+            marker in lowered for marker in ("change-me", "replace-with", "example")
+        ):
+            raise ValueError("DATABASE_URL must use a strong PostgreSQL password (at least 24 characters)")
 
     class Config:
         extra = "ignore"

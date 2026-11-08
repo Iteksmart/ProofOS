@@ -27,7 +27,14 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="ProofOS Proof Ledger", version="1.0.0", docs_url="/docs", lifespan=lifespan)
+app = FastAPI(
+    title="ProofOS Proof Ledger",
+    version="1.0.0",
+    docs_url=None if settings.api_env.lower() == "production" else "/docs",
+    redoc_url=None if settings.api_env.lower() == "production" else "/redoc",
+    openapi_url=None if settings.api_env.lower() == "production" else "/openapi.json",
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

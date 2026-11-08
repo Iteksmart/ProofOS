@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import httpx
+from urllib.parse import urlencode
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
@@ -26,7 +27,7 @@ def build_auth_url(state: str = "proofos") -> str:
         "state": state,
         "access_type": "online",
     }
-    return AUTH_URL + "?" + "&".join(f"{k}={v}" for k, v in params.items())
+    return AUTH_URL + "?" + urlencode(params)
 
 
 def exchange_code(code: str) -> dict:

@@ -1,33 +1,47 @@
+"""AWS EC2 inventory using the official SDK and its credential chain."""
 from __future__ import annotations
 
-import httpx
+import os
 
-from .base import VendorAdapter
+import boto3
+
+from .base import AdapterConfigurationError, VendorAdapter
 
 
 class AwsAdapter(VendorAdapter):
-    """AWS EC2 instance sync via a thin REST gateway (SigV4 handled upstream)."""
-
     vendor = "aws"
-    base_url_env = "AWS_BASE_URL"
 
     def list_resources(self) -> list[dict]:
-        r = httpx.get(f"{self.base_url}/ec2/instances", headers=self._headers(), timeout=15)
-        r.raise_for_status()
-        items = self.normalise(r.json())
-        self._proof("vendor.aws.instances.list", {"count": len(items)}, why={"reason": "AWS EC2 sync"})
-        return items
+        region = (os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "").strip()
+        if not region:
+            raise AdapterConfigurationError("AWS_REGION must be configured")
+        profile = os.getenv("AWS_PROFILE", "").strip() or None
+        session = boto3.Session(profile_name=profile, region_name=region)
+        ec2 = session.client("ec2")
+        paginator = ec2.get_paginator("describe_instances")
+        raw = [page for page in paginator.paginate()]
+        instances = self.normalise_pages(raw)
+        self._proof("vendor.aws.instances.list", {"count": len(instances), "region": region}, why={"reason": "EC2 inventory sync"})
+        return instances
 
-    def normalise(self, raw: dict) -> list[dict]:
-        out = []
-        for res in raw.get("Reservations", []):
-            for i in res.get("Instances", []):
-                out.append(
-                    {
-                        "id": i.get("InstanceId"),
-                        "name": next((t.get("Value") for t in i.get("Tags", []) if t.get("Key") == "Name"), ""),
-                        "state": i.get("State", {}).get("Name"),
-                        "type": i.get("InstanceType"),
-                    }
-                )
-        return out
+    def normalise_pages(self, pages: list[dict]) -> list[dict]:
+        instances = []
+        for page in pages:
+            for reservation in page.get("Reservations", []):
+                for instance in reservation.get("Instances", []):
+                    tags = {tag.get("Key"): tag.get("Value") for tag in (instance.get("Tags") or []) if isinstance(tag, dict)}
+                    state = instance.get("State") or {}
+                    placement = instance.get("Placement") or {}
+                    instances.append(
+                        {
+                            "id": instance.get("InstanceId"),
+                            "name": tags.get("Name", ""),
+                            "state": state.get("Name"),
+                            "type": instance.get("InstanceType"),
+                            "availability_zone": placement.get("AvailabilityZone"),
+                            "private_ip": instance.get("PrivateIpAddress"),
+                            "public_ip": instance.get("PublicIpAddress"),
+                            "source": self.vendor,
+                        }
+                    )
+        return instances

@@ -2,12 +2,37 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 # --- Auth / Orgs ---
 class OrgCreate(BaseModel):
     name: str = Field(min_length=2, max_length=255)
+
+
+class WorkspaceBootstrap(BaseModel):
+    name: str = Field(min_length=2, max_length=255)
+    email: EmailStr | None = None
+    password: str | None = Field(default=None, min_length=12, max_length=256)
+
+    @model_validator(mode="after")
+    def require_admin_credentials_together(self):
+        if bool(self.email) != bool(self.password):
+            raise ValueError("email and password must be provided together")
+        return self
+
+
+class OrgRename(BaseModel):
+    name: str = Field(min_length=2, max_length=255)
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
+    new_password: str = Field(min_length=12, max_length=256)
 
 
 class OrgOut(BaseModel):
@@ -28,6 +53,11 @@ class UserCreate(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str | None = None
+    new_password: str = Field(min_length=12, max_length=256)
 
 
 class TokenOut(BaseModel):
@@ -664,6 +694,77 @@ class PushDeviceOut(BaseModel):
     user_id: int
     fcm_token: str
     platform: str
+
+    class Config:
+        from_attributes = True
+
+
+# --- Secure Workspace (encrypted enclave) ---
+class EnclavePolicyIn(BaseModel):
+    name: str = Field(min_length=2, max_length=255)
+    allowed_apps: str = "[]"
+    blocked_apps: str = "[]"
+    network_allowlist: str = "[]"
+    dlp_rules: str = "{}"
+    clipboard_enabled: bool = False
+    watermark_enabled: bool = True
+    ai_governed: bool = True
+
+
+class EnclavePolicyOut(BaseModel):
+    id: int
+    org_id: int
+    name: str
+    allowed_apps: str
+    blocked_apps: str
+    network_allowlist: str
+    dlp_rules: str
+    clipboard_enabled: bool
+    watermark_enabled: bool
+    ai_governed: bool
+
+    class Config:
+        from_attributes = True
+
+
+class EnclaveCreate(BaseModel):
+    org_id: int
+    device_id: int
+    name: str = "Secure Workspace"
+    policy_id: int | None = None
+
+
+class EnclaveOut(BaseModel):
+    id: int
+    org_id: int
+    device_id: int
+    policy_id: int | None = None
+    name: str
+    status: str
+    encryption_key_id: str
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class EnclaveEventIn(BaseModel):
+    kind: str
+    severity: str = "info"
+    detail: str = ""
+    source: str = ""
+
+
+class EnclaveEventOut(BaseModel):
+    id: int
+    org_id: int
+    enclave_id: int
+    device_id: int
+    kind: str
+    severity: str
+    detail: str
+    source: str
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True

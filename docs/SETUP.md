@@ -1,7 +1,7 @@
 # Setup — New coder runbook
 
 ## 0. Prerequisites
-- Windows / macOS / Linux, Node 20, Python 3.12, Docker 24+
+- Windows / macOS / Linux, Node 22, Python 3.12, Docker 24+
 
 ## 1. Clone / open
 ```powershell
@@ -16,6 +16,10 @@ docker compose -f infra/docker-compose.yml up --build
 - API docs: http://localhost:8000/docs
 - Web: http://localhost:5173
 - Postgres: `psql "postgresql://proofos:proofos@localhost:5432/proofos"`
+
+This command starts the local development stack. Production deployments must use
+both `infra/docker-compose.yml` and `infra/docker-compose.production.yml`; see
+`docs/PRODUCTION.md` for secret generation, HTTPS, bootstrap, and proxy setup.
 
 ## 3. Create tables (dev)
 ```powershell

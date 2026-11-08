@@ -1,0 +1,38 @@
+# Production overlay: requires real secrets and a reviewed MeshCentral image.
+# Run from the repository root with the project's .env loaded by Compose.
+services:
+  postgres:
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+
+  api:
+    environment:
+      ENV: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET:?Set a random JWT_SECRET}
+      JWT_ALGO: ${JWT_ALGO:-HS256}
+      PROOF_SIGNING_SEED_HEX: ${PROOF_SIGNING_SEED_HEX:?Set a random 64-hex-character signing seed}
+      AGENT_TOKEN: ${AGENT_TOKEN:?Set a random AGENT_TOKEN}
+      ALLOW_BOOTSTRAP: ${PROOFOS_ALLOW_BOOTSTRAP:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set HTTPS browser origin(s)}
+      WEB_URL: ${WEB_URL:?Set the public HTTPS ProofOS URL}
+      TRUSTED_PROXY_IPS: ${PROOFOS_WEB_PROXY_IP:-172.31.240.2}
+
+  proof:
+    environment:
+      ENV: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET:?Set a random JWT_SECRET}
+      JWT_ALGO: ${JWT_ALGO:-HS256}
+      PROOF_SIGNING_SEED_HEX: ${PROOF_SIGNING_SEED_HEX:?Set a random 64-hex-character signing seed}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set HTTPS browser origin(s)}
+
+  web:
+    build:
+      args:
+        VITE_API_URL: ""
+
+  meshcentral:
+    image: ${MESHCENTRAL_IMAGE:?Set MESHCENTRAL_IMAGE to a reviewed version tag or digest}

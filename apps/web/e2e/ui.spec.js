@@ -2,8 +2,8 @@ import { test, expect } from "@playwright/test";
 
 async function bootstrap(page, org = "E2E UI Org") {
   await page.goto("/");
-  await page.getByLabel("Org name").fill(org);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByLabel("Workspace name").fill(`${org} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByText("Device health")).toBeVisible({ timeout: 25000 });
 }
 
@@ -11,13 +11,21 @@ function trackErrors(page) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => {
-    // Ignore the expected 401 from the login→bootstrap fallback.
-    if (m.type() === "error" && !/401|Failed to load resource/.test(m.text())) {
+    if (m.type() === "error" && !/Failed to load resource/.test(m.text())) {
       errors.push(`console.error: ${m.text()}`);
     }
   });
   return errors;
 }
+
+test("bad credentials do not create or enter a workspace", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("wrong@example.test");
+  await page.getByLabel("Password").fill("not-the-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("alert")).toContainText("Email or password is incorrect");
+  await expect(page.getByRole("button", { name: "Logout" })).toHaveCount(0);
+});
 
 const nav = (name) => page => page.getByRole("button", { name, exact: true }).click();
 

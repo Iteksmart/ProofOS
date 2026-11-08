@@ -43,6 +43,54 @@ def test_health(client):
     assert body["db"] == "ok"
 
 
+def test_login_rate_limiter_ignores_untrusted_forwarded_header():
+    from starlette.requests import Request
+
+    from app.core.security import _login_rate_limit_key
+
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/v1/auth/login",
+        "headers": [(b"x-forwarded-for", b"198.51.100.1")],
+        "client": ("203.0.113.10", 1234),
+        "server": ("testserver", 80),
+        "scheme": "http",
+        "query_string": b"",
+    })
+    assert _login_rate_limit_key(request) == "203.0.113.10"
+
+
+def test_websocket_events_are_org_scoped():
+    from app.main import _events_for_org
+
+    events = [
+        {"org_id": 1, "type": "proof"},
+        {"org_id": 2, "type": "proof"},
+        {"type": "global"},
+    ]
+    assert _events_for_org(events, 1) == [events[0]]
+    assert _events_for_org(events, None) == []
+
+
+def test_production_settings_reject_unsafe_origins_and_sqlite():
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        api_env="production",
+        jwt_secret="x" * 40,
+        proof_key_seed_hex="00" * 32,
+        agent_token="agent-secret",
+        database_url="sqlite:///./unsafe.db",
+        api_cors_origins="*",
+    )
+    with pytest.raises(ValueError) as error:
+        settings.validate_production()
+    assert "PostgreSQL" in str(error.value)
+    assert "wildcard" in str(error.value)
+
+
 def test_full_flow(auth_client):
     client, org_id, token = auth_client
     r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ws-01", "os": "Linux", "ip": "10.0.0.1"})
@@ -181,10 +229,30 @@ def test_production_config_fails_closed():
         _env_file=None,
         jwt_secret="s" * 40,
         proof_key_seed_hex="ab" * 32,
-        agent_token="secret",
+        agent_token="a" * 48,
         api_env="production",
+        database_url=f"postgresql+psycopg://user:{'a' * 64}@localhost/proofos",
+        api_cors_origins="https://proofos.example.com",
+        web_url="https://proofos.example.com",
     )
     good.validate_production()  # must not raise
+
+
+def test_production_rejects_plain_http_browser_origins():
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        jwt_secret="s" * 40,
+        proof_key_seed_hex="ab" * 32,
+        agent_token="a" * 48,
+        api_env="production",
+        database_url=f"postgresql+psycopg://user:{'a' * 64}@localhost/proofos",
+        api_cors_origins="http://proofos.example.com",
+        web_url="https://proofos.example.com",
+    )
+    with pytest.raises(ValueError, match="HTTPS origin"):
+        settings.validate_production()
 
 
 def test_bootstrap_blocked_in_prod(client, monkeypatch):
@@ -208,7 +276,6 @@ def test_create_user_admin_only(auth_client):
     client, org_id, _ = auth_client
     r = client.post("/v1/auth/users", json={"org_id": org_id, "email": "eng@proofos.dev", "password": "password123", "role": "engineer"})
     assert r.status_code == 201, r.text
-
     r = client.post("/v1/auth/login", json={"email": "eng@proofos.dev", "password": "password123"})
     eng_token = r.json()["access_token"]
 
@@ -218,6 +285,11 @@ def test_create_user_admin_only(auth_client):
         headers={"Authorization": f"Bearer {eng_token}"},
     )
     assert r.status_code == 403, r.text
+
+
+def test_admin_cannot_list_users_from_another_org(auth_client):
+    client, org_id, _ = auth_client
+    assert client.get(f"/v1/auth/users?org_id={org_id + 1}").status_code == 403
 
 
 def test_agent_token_required(client, monkeypatch):
@@ -755,12 +827,18 @@ def test_itechsmart_integration(auth_client):
     assert "mcp" in r.json() and "prooflink_plus" in r.json()
 
     r = client.get("/v1/itechsmart/tools")
-    assert r.status_code == 200, r.text
-    assert isinstance(r.json().get("tools"), list)
+    if probe.get("mcp", {}).get("ok"):
+        assert r.status_code == 200, r.text
+        assert isinstance(r.json().get("tools"), list)
+    else:
+        assert r.status_code == 502, r.text
 
     r = client.get("/v1/itechsmart/chain")
-    assert r.status_code == 200, r.text
-    assert "receipts" in r.json()
+    if probe.get("prooflink_plus", {}).get("ok"):
+        assert r.status_code == 200, r.text
+        assert "receipts" in r.json()
+    else:
+        assert r.status_code == 502, r.text
 
 
 def test_itechsmart_mcp_call_requires_key(auth_client, monkeypatch):
@@ -770,6 +848,25 @@ def test_itechsmart_mcp_call_requires_key(auth_client, monkeypatch):
     result = itechsmart.mcp_call("query_uaio_status", {})
     assert result.get("ok") is False
     assert "ITECHSMART_API_KEY" in result.get("error", "")
+
+
+def test_itechsmart_endpoints_require_privileged_role(auth_client):
+    client, org_id, _ = auth_client
+    created = client.post("/v1/auth/users", json={
+        "org_id": org_id,
+        "email": "viewer@proofos.dev",
+        "password": "test-password-123",
+        "role": "viewer",
+    })
+    assert created.status_code == 201, created.text
+    login = client.post("/v1/auth/login", json={
+        "email": "viewer@proofos.dev",
+        "password": "test-password-123",
+    })
+    assert login.status_code == 200, login.text
+    client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+    assert client.get("/v1/itechsmart/status").status_code == 403
+    assert client.post("/v1/itechsmart/mcp/call", json={"tool": "anything"}).status_code == 403
 
 
 def test_vm_register_and_control(auth_client):
@@ -864,7 +961,12 @@ def test_root_cause_and_apm(auth_client):
     assert "spans" in r.json()
 
 
-def test_google_sso_framework(auth_client):
+def test_google_sso_framework(auth_client, monkeypatch):
+    # Keep this test independent of the developer's repository-level .env file.
+    from app.services import google_sso
+
+    monkeypatch.setattr(google_sso.settings, "google_client_id", "")
+    monkeypatch.setattr(google_sso.settings, "google_client_secret", "")
     client, org_id, _ = auth_client
     r = client.get("/v1/sso/google")
     assert r.status_code == 200, r.text
@@ -915,6 +1017,92 @@ def test_bootstrap_random_password(client):
     assert len(data["initial_password"]) >= 16
 
 
+def test_bootstrap_accepts_chosen_admin_credentials(client):
+    r = client.post(
+        "/v1/auth/bootstrap",
+        json={"name": "Chosen Credentials Workspace", "email": "owner@example.com", "password": "chosen-local-password-2026"},
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["org"]["name"] == "Chosen Credentials Workspace"
+    assert data["user"]["email"] == "owner@example.com"
+    assert "initial_password" not in data
+    signed_in = client.post("/v1/auth/login", json={"email": "owner@example.com", "password": "chosen-local-password-2026"})
+    assert signed_in.status_code == 200, signed_in.text
+
+
+def test_admin_can_rename_own_workspace(auth_client):
+    client, org_id, _ = auth_client
+    r = client.patch(f"/v1/auth/orgs/{org_id}", json={"name": "Renamed Test Workspace"})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Renamed Test Workspace"
+    assert client.get(f"/v1/auth/orgs/{org_id}").json()["name"] == "Renamed Test Workspace"
+
+
+def test_password_reset_link_changes_password_once(client, monkeypatch):
+    from app.core.security import create_password_reset_token
+    from app.services import password_reset
+
+    created = client.post(
+        "/v1/auth/bootstrap",
+        json={"name": "Reset Link Workspace", "email": "reset@example.com", "password": "starting-password-2026"},
+    )
+    assert created.status_code == 201, created.text
+    issued = {}
+    monkeypatch.setattr(password_reset, "email_delivery_configured", lambda: True)
+    monkeypatch.setattr(password_reset, "send_password_reset_email", lambda user: issued.setdefault("token", create_password_reset_token(user)))
+
+    request = client.post("/v1/auth/password/reset-request", json={"email": "reset@example.com"})
+    assert request.status_code == 200, request.text
+    assert "token" not in request.json()
+    changed = client.post(
+        "/v1/auth/password/reset",
+        json={"token": issued["token"], "new_password": "replacement-password-2026"},
+    )
+    assert changed.status_code == 200, changed.text
+    assert client.post("/v1/auth/login", json={"email": "reset@example.com", "password": "replacement-password-2026"}).status_code == 200
+    assert client.post(
+        "/v1/auth/password/reset",
+        json={"token": issued["token"], "new_password": "replayed-password-2026"},
+    ).status_code == 400
+
+
+def test_bootstrap_cannot_reissue_admin_token_for_existing_org(client):
+    first = client.post("/v1/auth/bootstrap", json={"name": "Protected Workspace"})
+    assert first.status_code == 201, first.text
+    second = client.post("/v1/auth/bootstrap", json={"name": "protected workspace"})
+    assert second.status_code == 409, second.text
+    assert "access_token" not in second.json()
+
+
+def test_password_change_requires_current_password_for_password_sessions(client):
+    created = client.post("/v1/auth/bootstrap", json={"name": "Password Change Workspace"}).json()
+    token = created["access_token"]
+    email = created["user"]["email"]
+    first_password = created["initial_password"]
+    changed = client.post(
+        "/v1/auth/password",
+        json={"current_password": first_password, "new_password": "strong-new-password-2026"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert changed.status_code == 200, changed.text
+    signed_in = client.post("/v1/auth/login", json={"email": email, "password": "strong-new-password-2026"})
+    assert signed_in.status_code == 200, signed_in.text
+    token2 = signed_in.json()["access_token"]
+    denied = client.post(
+        "/v1/auth/password",
+        json={"new_password": "another-strong-password-2026"},
+        headers={"Authorization": f"Bearer {token2}"},
+    )
+    assert denied.status_code == 400, denied.text
+    changed2 = client.post(
+        "/v1/auth/password",
+        json={"current_password": "strong-new-password-2026", "new_password": "another-strong-password-2026"},
+        headers={"Authorization": f"Bearer {token2}"},
+    )
+    assert changed2.status_code == 200, changed2.text
+
+
 def test_kill_switch_blocks_execution(auth_client):
     client, org_id, _ = auth_client
     r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "ks-host", "os": "Linux", "ip": "10.0.0.9"})
@@ -934,3 +1122,39 @@ def test_kill_switch_blocks_execution(auth_client):
     # allowed again
     r = client.post(f"/v1/scripts/{sid}/run", params={"device_id": dev_id})
     assert r.status_code == 201, r.text
+
+
+def test_dlp_detection():
+    from app.services import dlp
+
+    hits = dlp.detect("SSN is 123-45-6789 and card 4111 1111 1111 1111")
+    patterns = {h["pattern"] for h in hits}
+    assert "ssn" in patterns
+    assert "credit_card" in patterns
+    assert "123-45-6789" not in str(hits)  # redacted, never stored raw
+
+
+def test_enclave_lifecycle(auth_client):
+    client, org_id, _ = auth_client
+    r = client.post("/v1/enclaves/policies", params={"org_id": org_id}, json={"name": "BYOD baseline", "blocked_apps": '["dropbox"]', "network_allowlist": '["acme.com","10.0.0.0/8"]'})
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    r = client.post("/v1/devices", json={"org_id": org_id, "hostname": "byod-laptop", "os": "macOS 15", "ip": "10.0.5.10"})
+    did = r.json()["id"]
+    r = client.post("/v1/enclaves", json={"org_id": org_id, "device_id": did, "name": "Contractor Workspace", "policy_id": pid})
+    assert r.status_code == 201, r.text
+    enclave_id = r.json()["enclave"]["id"]
+    assert r.json()["enclave_key"]
+    r = client.get(f"/v1/enclaves?org_id={org_id}")
+    assert any(e["id"] == enclave_id for e in r.json())
+    # report a DLP event — sensitive data in detail auto-escalates to critical
+    r = client.post(f"/v1/enclaves/{enclave_id}/events", json={"kind": "dlp_blocked", "detail": "attempted to copy SSN 111-22-3333 out of enclave", "source": "clipboard"})
+    assert r.status_code == 201, r.text
+    assert r.json()["severity"] == "critical"
+    r = client.get(f"/v1/enclaves/{enclave_id}/events")
+    assert len(r.json()) == 1
+    r = client.post("/v1/enclaves/scan", json={"text": "api key is AKIAIOSFODNN7EXAMPLE"})
+    assert r.json()["blocked"] is True
+    r = client.patch(f"/v1/enclaves/{enclave_id}", json={"status": "suspended"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "suspended"

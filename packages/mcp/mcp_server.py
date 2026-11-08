@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 
 import httpx
+from packages.mcp.adapters import ADAPTERS
 
 API = os.getenv("PROOFOS_API_URL", "http://localhost:8000").rstrip("/")
 TOKEN = os.getenv("PROOFOS_TOKEN", "")
@@ -104,6 +105,16 @@ def ai_ask(org_id: int, query: str) -> dict:
     return httpx.post(f"{API}/v1/ai/ask", json={"org_id": org_id, "query": query}, headers=_headers()).json()
 
 
+def vendor_resources_list(vendor: str) -> dict:
+    """Read inventory directly from a configured first-party vendor adapter."""
+    adapter_type = ADAPTERS.get(vendor)
+    if adapter_type is None:
+        supported = ", ".join(sorted(ADAPTERS))
+        raise ValueError(f"unsupported vendor {vendor!r}; choose one of: {supported}")
+    resources = adapter_type().list_resources()
+    return {"vendor": vendor, "count": len(resources), "resources": resources}
+
+
 TOOLS = {
     "device_list": device_list,
     "device_get": device_get,
@@ -125,34 +136,22 @@ TOOLS = {
     "ai_ask": ai_ask,
     "audit_run": audit_run,
     "audit_list": audit_list,
+    "vendor_resources_list": vendor_resources_list,
 }
 
 
 def _register() -> None:
     try:
         from mcp.server.fastmcp import FastMCP  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            "The ProofOS MCP server requires the MCP SDK. Install packages/mcp/requirements.txt."
+        ) from exc
 
-        mcp = FastMCP("proofos")
-        for name, fn in TOOLS.items():
-            mcp.tool()(fn)
-        mcp.run()
-        return
-    except ImportError:
-        pass
-
-    # Fallback JSON-RPC over stdio is MCP SDK-specific; expose plain call helper.
-    import json
-    import sys
-
-    for line in sys.stdin:
-        try:
-            req = json.loads(line)
-            name = req.get("name") or req.get("tool")
-            args = req.get("arguments") or req.get("args") or {}
-            fn = TOOLS.get(name)
-            print(json.dumps(fn(**args) if fn else {"error": f"unknown tool {name}"}))
-        except Exception as e:
-            print(json.dumps({"error": str(e)}))
+    mcp = FastMCP("proofos")
+    for fn in TOOLS.values():
+        mcp.tool()(fn)
+    mcp.run()
 
 
 if __name__ == "__main__":

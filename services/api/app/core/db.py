@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
@@ -45,7 +46,25 @@ def init_db() -> None:
     # Import models so metadata registers
     import app.models.models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
+    if not settings.is_prod:
+        # Convenient local/test setup; production schema is managed by Alembic.
+        Base.metadata.create_all(bind=engine)
+        return
+
+    from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    alembic_config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    scripts = ScriptDirectory.from_config(alembic_config)
+    expected = scripts.get_current_head()
+    with engine.connect() as connection:
+        actual = MigrationContext.configure(connection).get_current_revision()
+    if actual != expected:
+        raise RuntimeError(
+            f"Database schema revision {actual or 'unversioned'} does not match application head {expected}; "
+            "run `python -m alembic upgrade head` before starting ProofOS."
+        )
 
 
 def check_db() -> bool:

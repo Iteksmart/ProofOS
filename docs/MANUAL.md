@@ -94,7 +94,7 @@ copy .env.example .env
 
 Edit `.env` (see [Configuration Reference](#4-configuration-reference)).
 
-### 3.3 Start the stack
+### 3.3 Start the local development stack
 
 ```powershell
 docker compose -f infra/docker-compose.yml up -d --build
@@ -107,15 +107,17 @@ curl http://localhost:8000/health
 # {"ok":true,"status":"ok","platform":"ProofOS","version":"1.0.0","db":"ok"}
 ```
 
-Open the web UI at `http://localhost:5173` (dev) or `https://<your-domain>` (production).
+Open the web UI at `http://localhost:5173` (local development). For production,
+use the hardened deployment steps in [docs/PRODUCTION.md](PRODUCTION.md), which
+use the production Compose overlay and same-origin API proxy.
 
 ### 3.4 Production hardening (required before go-live)
 
-1. Put **nginx** (or Caddy/Cloudflare) in front with TLS termination.
-2. Set `ENV=production` (enables fail-closed validation — see §13).
-3. Use **managed Postgres/Redis** or enable host volume persistence (already in Compose).
-4. Set strong secrets: `JWT_SECRET`, `PROOF_SIGNING_SEED_HEX`, `VAULT_KEY`, `AGENT_TOKEN`.
-5. Set `ALLOW_BOOTSTRAP=false` after creating your first org.
+1. Configure `WEB_URL`, HTTPS `CORS_ORIGINS`, and strong secrets in `.env`.
+2. Keep `VITE_API_URL` empty so browser traffic uses the same-origin API/WebSocket proxy.
+3. Run `docker compose -f infra/docker-compose.yml -f infra/docker-compose.production.yml up -d --build`.
+4. Put a TLS terminator in front of the web port and allow WebSocket upgrades.
+5. Keep bootstrap disabled after the one-time workspace setup.
 6. Back up Postgres + the proof chain (see §12).
 
 ---
@@ -133,9 +135,11 @@ All settings are read from environment variables (via `.env`).
 | `ENV` | `development` | `production` enables fail-closed checks |
 | `JWT_SECRET` | — | **required**, ≥32 chars |
 | `PROOF_SIGNING_SEED_HEX` | — | 64 hex chars, Ed25519 signing seed |
-| `AGENT_TOKEN` | — | shared agent auth (optional; per-device secrets preferred) |
-| `ALLOW_BOOTSTRAP` | `true` | allow first-run bootstrap (disable in prod) |
+| `AGENT_TOKEN` | — | random shared agent auth token (required in production; per-device secrets preferred) |
+| `ALLOW_BOOTSTRAP` | `true` in development, `false` in production | allow one-time workspace setup; existing workspaces cannot be claimed |
 | `WEB_URL` | `http://localhost:5173` | SPA origin (SSO redirects) |
+| `CORS_ORIGINS` | `http://localhost:5173` | browser origin(s); HTTPS-only in production |
+| `VITE_API_URL` | empty in Compose | browser API base; keep empty for same-origin production routing |
 | `APM_ENABLED` | `false` | record request-trace spans |
 
 ### AI
@@ -181,12 +185,12 @@ All settings are read from environment variables (via `.env`).
 
 ## 5. First Run & Bootstrap
 
-1. Open the web UI → the login screen shows **"Sign in"**, **"Sign in with Google"**, and the bootstrap hint.
-2. Enter an **Org name** (e.g. `Acme Corp`) and click **Sign in**.
-3. On first run, the app auto-bootstraps: creates the org + an admin user (`admin-<id>@proofos.dev`) and logs you in.
-4. **Immediately**: change the admin password and email (Admin → Users), then set `ALLOW_BOOTSTRAP=false` in `.env` and restart.
+1. Open the web UI and choose **First time here? Create a workspace**.
+2. Enter a new workspace name and choose **Create workspace**. Sign-in failures never trigger setup.
+3. The app creates an isolated workspace and signs you in. Save the displayed one-time administrator email and password in a password manager; the password is shown only once.
+4. Set `ALLOW_BOOTSTRAP=false` in `.env` after setup and restart the API. Existing workspace names return `409` and never yield an admin token.
 
-> **API alternative**: `POST /v1/auth/bootstrap` `{"name": "Acme Corp"}` → returns `{org, user, access_token}`. Idempotent — safe to re-run.
+> **API alternative**: `POST /v1/auth/bootstrap` `{"name": "Acme Corp"}` → returns `{org, user, access_token, initial_password}` once. A workspace name that already exists is rejected.
 
 ---
 
@@ -371,6 +375,7 @@ Configure `ITECHSMART_MCP_URL` + `ITECHSMART_API_KEY`, then:
 - `GET /v1/mcp/tools` — registry of 25+ tools (`device.*`, `ticket.*`, `proof.verify`, `audit.run`, `vm.*`, `approval.*`, `itechsmart.mcp_call`, …)
 - `GET /.well-known/agent.json` — A2A agent card for agent discovery.
 - Connect Claude/Cursor/LangGraph/CrewAI to ProofOS as a tool.
+- The standalone MCP server also provides `vendor_resources_list(vendor)` for direct, read-only inventory from the configured Microsoft 365, Google Workspace, AWS, Azure, or VMware APIs. Configure the provider credentials described in [the connector guide](../packages/mcp/README.md).
 
 ### 9.3 Notifications
 

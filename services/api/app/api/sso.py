@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hmac
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
@@ -117,7 +120,7 @@ async def acs(request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=403, detail=f"No ProofOS user for {email} — ask an admin to create it first")
-    token = create_access_token(str(user.id), {"email": user.email, "role": user.role, "org_id": user.org_id})
+    token = create_access_token(str(user.id), {"email": user.email, "role": user.role, "org_id": user.org_id, "auth_method": "saml"})
     emit(db, "auth.saml_sso", {"email": email, "nameid": auth.get_nameid()}, actor_of(user), {"org_id": user.org_id}, {"reason": "SAML SSO login"})
     if settings.web_url:
         return RedirectResponse(f"{settings.web_url.rstrip('/')}/?sso_token={token}")
@@ -129,19 +132,38 @@ def google_status():
     return {"configured": google_sso.configured(), "client_id_set": bool(settings.google_client_id)}
 
 
+_GOOGLE_STATE_COOKIE = "proofos_google_oauth_state"
+
+
 @router.get("/google/login")
-def google_login(state: str = "proofos"):
+def google_login(request: Request):
     if not google_sso.configured():
         raise HTTPException(status_code=400, detail="Google SSO not configured — set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET")
-    return RedirectResponse(google_sso.build_auth_url(state))
+    state = secrets.token_urlsafe(32)
+    response = RedirectResponse(google_sso.build_auth_url(state))
+    response.set_cookie(
+        _GOOGLE_STATE_COOKIE,
+        state,
+        max_age=600,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+        path="/v1/sso/google/callback",
+    )
+    return response
 
 
 @router.get("/google/callback")
-def google_callback(code: str | None = None, state: str | None = None, db: Session = Depends(get_db)):
+def google_callback(request: Request, code: str | None = None, state: str | None = None, db: Session = Depends(get_db)):
     if not code:
         raise HTTPException(status_code=400, detail="missing authorization code")
     if not google_sso.configured():
         raise HTTPException(status_code=400, detail="Google SSO not configured")
+    # Google redirects to this API endpoint in the same browser. Bind the callback
+    # to the login request so a forged callback cannot sign a victim in as another user.
+    expected_state = request.cookies.get(_GOOGLE_STATE_COOKIE, "")
+    if not state or not expected_state or not hmac.compare_digest(state, expected_state):
+        raise HTTPException(status_code=400, detail="invalid or expired Google OAuth state; try signing in again")
     try:
         tokens = google_sso.exchange_code(code)
     except Exception:
@@ -157,12 +179,17 @@ def google_callback(code: str | None = None, state: str | None = None, db: Sessi
     email = claims.get("email")
     if not email:
         raise HTTPException(status_code=401, detail="no email in Google claims")
+    if claims.get("email_verified") is not True:
+        raise HTTPException(status_code=401, detail="Google account email is not verified")
+    email = email.strip().lower()
 
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=403, detail=f"No ProofOS user for {email} — ask an admin to create it first")
-    token = create_access_token(str(user.id), {"email": user.email, "role": user.role, "org_id": user.org_id})
+    token = create_access_token(str(user.id), {"email": user.email, "role": user.role, "org_id": user.org_id, "auth_method": "google"})
     emit(db, "auth.google_sso", {"email": email, "sub": claims.get("sub")}, actor_of(user), {"org_id": user.org_id}, {"reason": "Google SSO login"})
     if settings.web_url:
-        return RedirectResponse(f"{settings.web_url.rstrip('/')}/?sso_token={token}")
+        redirect = RedirectResponse(f"{settings.web_url.rstrip('/')}/#sso_token={token}")
+        redirect.delete_cookie(_GOOGLE_STATE_COOKIE, path="/v1/sso/google/callback")
+        return redirect
     return {"access_token": token, "token_type": "bearer", "user": {"id": user.id, "email": user.email, "role": user.role, "org_id": user.org_id}}

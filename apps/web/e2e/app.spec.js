@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 
 async function bootstrap(page, org = "E2E Org") {
   await page.goto("/");
-  await page.getByLabel("Org name").fill(org);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // Dashboard loads after bootstrap (default view "Overview").
+  await page.getByLabel("Workspace name").fill(`${org} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  // Dashboard loads after the explicit first-run workspace setup.
   await expect(page.getByText("Device health")).toBeVisible({ timeout: 25000 });
 }
 

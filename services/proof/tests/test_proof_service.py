@@ -9,6 +9,49 @@ os.environ.setdefault("JWT_SECRET", "proof-service-test-secret-at-least-32")
 from fastapi.testclient import TestClient  # noqa: E402
 
 
+def test_production_settings_reject_weak_database_and_wildcard_cors():
+    import pytest
+
+    from app.config import Settings
+
+    bad = Settings(
+        database_url="sqlite:///./proof.db",
+        jwt_secret="s" * 40,
+        proof_key_seed_hex="ab" * 32,
+        api_env="production",
+        api_cors_origins="*",
+    )
+    with pytest.raises(ValueError, match="PostgreSQL"):
+        Settings(
+            database_url="sqlite:///./proof.db",
+            jwt_secret="s" * 40,
+            proof_key_seed_hex="ab" * 32,
+            api_env="production",
+            api_cors_origins="https://proofos.example.com",
+        ).validate_production()
+    with pytest.raises(ValueError, match="wildcard"):
+        bad.validate_production()
+
+    good = Settings(
+        database_url=f"postgresql+psycopg://proofos:{'c' * 64}@localhost/proofos",
+        jwt_secret="s" * 40,
+        proof_key_seed_hex="ab" * 32,
+        api_env="production",
+        api_cors_origins="https://proofos.example.com",
+    )
+    good.validate_production()
+
+    bad_http_origin = Settings(
+        database_url=f"postgresql+psycopg://proofos:{'c' * 64}@localhost/proofos",
+        jwt_secret="s" * 40,
+        proof_key_seed_hex="ab" * 32,
+        api_env="production",
+        api_cors_origins="http://proofos.example.com",
+    )
+    with pytest.raises(ValueError, match="HTTPS origin"):
+        bad_http_origin.validate_production()
+
+
 def test_proof_service():
     from app.db import Base, engine
     from app.main import app

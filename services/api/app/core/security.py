@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import threading
 import time
 from collections import defaultdict, deque
@@ -40,6 +41,36 @@ def create_access_token(subject: str, extra: dict | None = None) -> str:
 
 def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algo])
+
+
+def _password_version(user) -> str:
+    return hmac.new(
+        settings.jwt_secret.encode(), user.hashed_password.encode(), hashlib.sha256
+    ).hexdigest()
+
+
+def create_password_reset_token(user) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user.id),
+        "purpose": "password_reset",
+        "password_version": _password_version(user),
+        "iat": now,
+        "exp": now + timedelta(minutes=20),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algo)
+
+
+def verify_password_reset_token(token: str, user) -> bool:
+    try:
+        claims = decode_token(token)
+    except JWTError:
+        return False
+    return (
+        claims.get("purpose") == "password_reset"
+        and claims.get("sub") == str(user.id)
+        and hmac.compare_digest(str(claims.get("password_version", "")), _password_version(user))
+    )
 
 
 def _bearer_token(request: Request) -> str | None:
@@ -134,15 +165,15 @@ def verify_agent(request: Request, db: Session, device_id: int | None = None) ->
 
         dev = db.query(Device).filter(Device.id == device_id).first()
         if dev is not None and dev.secret_hash:
-            if presented and hashlib.sha256(presented.encode()).hexdigest() == dev.secret_hash:
+            if presented and hmac.compare_digest(hashlib.sha256(presented.encode()).hexdigest(), dev.secret_hash):
                 return
             raise HTTPException(status_code=401, detail="invalid device token")
-        if settings.agent_token and presented == settings.agent_token:
+        if settings.agent_token and presented and hmac.compare_digest(presented, settings.agent_token):
             return
         if dev is None:
             raise HTTPException(status_code=401, detail="unknown device")
         raise HTTPException(status_code=401, detail="invalid device token")
-    if settings.agent_token and presented == settings.agent_token:
+    if settings.agent_token and presented and hmac.compare_digest(presented, settings.agent_token):
         return
     raise HTTPException(status_code=401, detail="invalid agent token")
 
@@ -181,12 +212,23 @@ class SlidingWindowLimiter:
 
 
 login_limiter = SlidingWindowLimiter(max_calls=10, window_seconds=60.0)
+password_reset_limiter = SlidingWindowLimiter(max_calls=5, window_seconds=900.0)
+
+
+def _login_rate_limit_key(request: Request) -> str:
+    # Trust only the peer address resolved by the ASGI server. Raw
+    # X-Forwarded-For is user-controlled unless a trusted proxy has parsed it;
+    # using it directly lets an attacker rotate header values to bypass limits.
+    return request.client.host if request.client else "unknown"
 
 
 def rate_limit_login(request: Request) -> None:
-    key = request.client.host if request.client else "unknown"
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        key = forwarded.split(",")[0].strip()
+    key = _login_rate_limit_key(request)
     if not login_limiter.allow(key):
         raise HTTPException(status_code=429, detail="too many login attempts, try again later")
+
+
+def rate_limit_password_reset(request: Request) -> None:
+    key = _login_rate_limit_key(request)
+    if not password_reset_limiter.allow(key):
+        raise HTTPException(status_code=429, detail="too many password reset attempts, try again later")

@@ -5,11 +5,15 @@
 | Threat | Mitigation |
 |---|---|
 | Weak/absent secrets in production | `Settings.validate_production()` fails closed at startup. |
+| Accidental development configuration in production | The production Compose overlay forces `ENV=production`, requires core secrets, and keeps bootstrap off by default. |
+| Database exposure to the web tier | Postgres and Redis use an internal data network; the browser network contains only the web proxy and API. |
+| Spoofed client IP through proxy headers | Uvicorn trusts only the configured web proxy IP. The outer TLS proxy must replace caller-supplied `X-Forwarded-For` with the verified client address. |
 | Anonymous org/user creation | `POST /v1/auth/orgs` and `/users` require JWT; user creation is admin/manager-scoped. |
-| Unauthenticated first-run backdoor | Production defaults `ALLOW_BOOTSTRAP` to false; first-run bootstrap must be explicitly enabled and then disabled. |
+| Unauthenticated first-run backdoor | Production defaults `ALLOW_BOOTSTRAP` to false; when enabled, bootstrap can only create a new workspace name and can never mint a token for an existing workspace. |
 | Agent endpoints open to anyone | Agent requests require the matching per-device secret; the shared token is accepted only for legacy devices without a device secret. |
 | Cross-tenant proof leakage | Proof records carry `org_id`; list/chain/verify are org-scoped. |
-| Login brute-force | In-process sliding-window limiter (10/min/IP); scale via Redis. |
+| Login brute-force | In-process sliding-window limiter (10/min/ASGI peer); raw forwarded headers are not trusted. Use a trusted proxy and shared limiter when scaling horizontally. |
+| Cross-tenant WebSocket event leak | Every live event is filtered by the JWT organization claim; organization-less events are not sent to tenant feeds. |
 | Clickjacking / MIME sniffing / referrer leak | Security headers (`X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, HSTS in prod). |
 | XSS → token theft | JWT in `localStorage` is a tradeoff (see residual risks); CSP is applied via nginx (`apps/web/nginx.conf`). |
 
@@ -43,8 +47,9 @@
    explicit approval. A **fail-closed kill switch** (`POST /v1/ops/kill-switch`,
    env `KILL_SWITCH=1` for immediate halt), and per-device secrets. Remaining:
    OS-level execution sandboxing and a signed-script policy.
-4. **No database migrations** — `create_all` only creates missing tables; use Alembic
-   for live-schema evolution.
-5. **In-process rate limiter** — single-instance only; use Redis for multi-replica.
+4. **Existing-database adoption** — legacy databases need a reviewed one-time Alembic baseline stamp before versioned migrations can run. Follow the backup and schema-check procedure in `docs/PRODUCTION.md`.
+5. **In-process rate limiter** — single-instance only; use a shared Redis-backed limiter or edge rate limiting for multi-replica deployments.
+6. **Remote control ingress** — MeshCentral ports bind to loopback by default. If remote agents require a published agent port, expose only the required interface and firewall it to the intended fleet.
+7. **Container image updates** — the production overlay requires a reviewed MeshCentral tag or digest. Update it on a planned cadence after reviewing vendor releases.
 
 See `docs/PRODUCTION.md` for the deployment checklist.
