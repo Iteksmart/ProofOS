@@ -11,6 +11,10 @@ from app.models.models import Alert, Automation, Audit, AuditFinding, Device, On
 SEVERITY_PENALTY = {"critical": 20, "high": 10, "medium": 5, "low": 2, "info": 1}
 
 
+def _as_utc(value: dt.datetime) -> dt.datetime:
+    return value if value.tzinfo else value.replace(tzinfo=dt.timezone.utc)
+
+
 class _Collector:
     def __init__(self) -> None:
         self.findings: list[dict] = []
@@ -52,7 +56,11 @@ def run_audit(db: Session, org_id: int, kind: str) -> tuple[list[dict], float]:
 
     if "compliance" in want:
         now = dt.datetime.now(dt.timezone.utc)
-        breached = [t for t in tickets if t.due_at and t.due_at < now and t.status not in {"closed", "cancelled"}]
+        # SQLite returns naive datetimes; treat them as UTC before comparing.
+        breached = [
+            t for t in tickets
+            if t.due_at and _as_utc(t.due_at) < now and t.status not in {"closed", "cancelled"}
+        ]
         if breached:
             c.add("compliance", "high", f"{len(breached)} ticket(s) breached SLA", ", ".join(f"#{t.id} {t.title}" for t in breached[:5]))
         chain = verify_chain(proofs) if proofs else {"chain_ok": True, "count": 0}
