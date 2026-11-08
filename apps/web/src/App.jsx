@@ -41,14 +41,21 @@ function Stat({ label, value, sub }) {
   );
 }
 
-function Table({ head, children }) {
+function Table({ head, children, empty = "Nothing here yet." }) {
+  const hasRows = React.Children.toArray(children).length > 0;
   return (
     <div className="overflow-x-auto card">
       <table className="w-full text-sm">
-        <thead className="text-slate-400 text-left border-b border-slate-800">
-          <tr>{head.map((h, i) => <th key={i} className="px-4 py-3 font-medium">{h}</th>)}</tr>
+        <thead className="text-left">
+          <tr>{head.map((h, i) => <th key={i} scope="col" className="px-4 py-3">{h}</th>)}</tr>
         </thead>
-        <tbody className="divide-y divide-slate-800">{children}</tbody>
+        <tbody className="divide-y divide-slate-800">
+          {hasRows ? children : (
+            <tr>
+              <td colSpan={head.length} className="px-4 py-12 text-center text-sm text-slate-500">{empty}</td>
+            </tr>
+          )}
+        </tbody>
       </table>
     </div>
   );
@@ -76,6 +83,20 @@ function Field({ label, children }) {
 }
 
 const inputCls = "w-full input px-3 py-2 text-sm text-slate-100";
+
+// "2026-11-09T14:00:11.071423" -> "Nov 9, 2026, 2:00 PM"; empty -> "—"
+function fmtDate(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+// "ticket.created" -> "Ticket created"
+function humanEvent(s = "") {
+  const t = s.replace(/[._]/g, " ").trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
 
 function Bars({ data, color = "bg-violet-500" }) {
   const max = Math.max(1, ...data.map((d) => d.value));
@@ -529,20 +550,22 @@ export default function App() {
 
   return (
     <div className="min-h-screen app-bg text-slate-100">
-      <header className="sticky top-0 z-20 border-b border-slate-800/60 px-6 py-3 flex flex-wrap items-center gap-3 backdrop-blur-xl bg-slate-950/60">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl gradient-bar flex items-center justify-center font-black text-white shadow-lg shadow-violet-500/25">P</div>
+      <header className="sticky top-0 z-20 backdrop-blur-xl bg-slate-950/70 border-b border-slate-800/60">
+        <div className="px-6 pt-3 pb-2 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl gradient-bar flex items-center justify-center font-black text-white shadow-lg shadow-violet-500/25" aria-hidden="true">P</div>
           <h1 className="text-lg font-extrabold tracking-tight">Proof<span className="gradient-text">OS</span></h1>
+          <span className="hidden sm:inline text-[11px] bg-violet-500/10 text-violet-300 px-2.5 py-1 rounded-full border border-violet-500/20 font-medium">RMM · Proof · AI</span>
+          <span className="hidden md:inline text-xs text-slate-500 font-medium truncate">org {orgId} · {orgName}</span>
+          <div className="ml-auto flex items-center gap-1">
+            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="btn-ghost rounded-lg px-3 py-1.5 text-[13px] text-slate-300 whitespace-nowrap" title="Toggle theme">{theme === "dark" ? "☀ Light" : "🌙 Dark"}</button>
+            <button onClick={load} className="btn-ghost rounded-lg px-3 py-1.5 text-[13px] text-slate-300 whitespace-nowrap">Refresh</button>
+            <button onClick={() => { localStorage.removeItem("proofos_token"); setAuthToken(""); }} className="rounded-lg px-3 py-1.5 text-[13px] text-red-400 hover:bg-red-500/10 whitespace-nowrap">Logout</button>
+          </div>
         </div>
-        <span className="text-[11px] bg-violet-500/10 text-violet-300 px-2.5 py-1 rounded-full border border-violet-500/20 font-medium">RMM · Proof · AI</span>
-        <span className="text-xs text-slate-500 font-medium">org {orgId} · {orgName}</span>
-        <nav className="ml-auto flex flex-wrap gap-1">
+        <nav aria-label="Main" className="tabs px-4">
           {nav.map(([v, label]) => (
-            <button key={v} onClick={() => setView(v)} className={`nav-pill px-3 py-1.5 text-[13px] font-medium ${view === v ? "active" : "text-slate-400"}`}>{label}</button>
+            <button key={v} onClick={() => setView(v)} aria-current={view === v ? "page" : undefined} className={`tab ${view === v ? "active" : ""}`}>{label}</button>
           ))}
-          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="nav-pill px-3 py-1.5 text-[13px] text-slate-400" title="Toggle theme">{theme === "dark" ? "☀ Light" : "🌙 Dark"}</button>
-          <button onClick={load} className="nav-pill px-3 py-1.5 text-[13px] text-slate-400">Refresh</button>
-          <button onClick={() => { localStorage.removeItem("proofos_token"); setAuthToken(""); }} className="nav-pill px-3 py-1.5 text-[13px] text-red-400">Logout</button>
         </nav>
       </header>
 
@@ -604,8 +627,8 @@ export default function App() {
                   <ul className="text-xs divide-y divide-slate-800">
                     {recentActivity.map((p) => (
                       <li key={p.id} className="py-1 flex justify-between gap-2">
-                        <span className="truncate">{p.what}</span>
-                        <button onClick={() => verify(p.id)} className="text-violet-400 hover:underline whitespace-nowrap">verify</button>
+                        <span className="truncate">{humanEvent(p.what)}</span>
+                        <button onClick={() => verify(p.id)} className="btn-ghost rounded-md px-2 py-0.5 text-[11px] text-violet-300 hover:text-violet-200 whitespace-nowrap">Verify</button>
                       </li>
                     ))}
                   </ul>
@@ -806,7 +829,7 @@ export default function App() {
                   <Field label="Assignee">
                     <input className={inputCls} value={selTicket.assignee} onBlur={(e) => updateTicket({ assignee: e.target.value })} onChange={() => {}} />
                   </Field>
-                  <div><span className="text-slate-500">SLA due</span><div className="text-sm">{isBreached(selTicket) ? <span className="text-red-400">breached · {selTicket.due_at}</span> : (selTicket.due_at || "—")}</div></div>
+                  <div><span className="text-slate-500">SLA due</span><div className="text-sm">{isBreached(selTicket) ? <span className="text-red-400">breached · {fmtDate(selTicket.due_at)}</span> : fmtDate(selTicket.due_at)}</div></div>
                 </div>
                 <div className="mb-3">
                   <h3 className="text-xs text-slate-400 mb-1">Comments</h3>
@@ -814,7 +837,7 @@ export default function App() {
                     {comments.length === 0 && <p className="text-xs text-slate-500">No comments.</p>}
                     {comments.map((c) => (
                       <div key={c.id} className="text-sm bg-slate-950 border border-slate-800 rounded p-2">
-                        <div className="text-xs text-slate-500">{c.author || "unknown"} · {c.created_at}</div>
+                        <div className="text-xs text-slate-500">{c.author || "unknown"} · {fmtDate(c.created_at)}</div>
                         <div>{c.body}</div>
                       </div>
                     ))}
@@ -839,7 +862,7 @@ export default function App() {
                   <td className="px-4 py-3">{t.status}</td>
                   <td className="px-4 py-3"><HealthPill status={t.severity} /></td>
                   <td className="px-4 py-3">{t.priority}</td>
-                  <td className="px-4 py-3 text-xs">{t.due_at ? (isBreached(t) ? <span className="text-red-400">breached · {t.due_at}</span> : <span className="text-slate-500">{t.due_at}</span>) : "—"}</td>
+                  <td className="px-4 py-3 text-xs">{t.due_at ? (isBreached(t) ? <span className="text-red-400">breached · {fmtDate(t.due_at)}</span> : <span className="text-slate-500">{fmtDate(t.due_at)}</span>) : "—"}</td>
                   <td className="px-4 py-3 flex gap-2 text-xs">
                     {t.status === "open" && <button className="text-sky-400 hover:underline" onClick={async () => { await api(`/v1/tickets/${t.id}`, { method: "PATCH", body: JSON.stringify({ status: "in_progress" }) }); load(); }}>Start</button>}
                     {["open", "in_progress", "pending"].includes(t.status) && <button className="text-violet-400 hover:underline" onClick={async () => { await api(`/v1/tickets/${t.id}/close`, { method: "POST", body: "{}" }); load(); }}>Close</button>}
@@ -1166,7 +1189,7 @@ export default function App() {
                   <td className="px-4 py-3 text-slate-500">#{a.id}</td>
                   <td className="px-4 py-3">{a.kind}</td>
                   <td className="px-4 py-3">{a.score}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{a.created_at}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(a.created_at)}</td>
                   <td className="px-4 py-3"><button className="text-sky-400 text-xs hover:underline" onClick={() => downloadPdf(a.id)}>PDF</button></td>
                 </tr>
               ))}
@@ -1352,7 +1375,7 @@ export default function App() {
                   <td className="px-4 py-3">{e.minutes}</td>
                   <td className="px-4 py-3">{e.notes}</td>
                   <td className="px-4 py-3">{e.billable ? "yes" : "no"}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{e.created_at}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(e.created_at)}</td>
                 </tr>
               ))}
             </Table>

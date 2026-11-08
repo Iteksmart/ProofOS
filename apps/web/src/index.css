@@ -200,3 +200,89 @@ a { color: var(--acc); }
 .light .nav-pill:hover { background: #ececf0; }
 .light .nav-pill.active { background: rgba(153, 51, 255, 0.1); border-color: rgba(153, 51, 255, 0.35); color: #7c3aed; }
 .light .text-sky-400 { color: #7c3aed !important; }
+
+/* ---------- Header tab strip (single line, scrolls on narrow screens) ---------- */
+.tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+          mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs:has(.tab:last-child.active) { -webkit-mask-image: none; mask-image: none; }
+.tab {
+  position: relative;
+  flex: none;
+  padding: 10px 12px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--tx2);
+  border-radius: 8px 8px 0 0;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.tab:hover { color: var(--w); background: rgba(255, 255, 255, 0.03); }
+.tab:focus-visible { outline: 2px solid rgba(153, 51, 255, 0.6); outline-offset: -2px; }
+.tab.active { color: var(--w); }
+.tab.active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #b366ff, #9933ff);
+  box-shadow: 0 0 10px rgba(153, 51, 255, 0.55);
+}
+
+/* ---------- Tables ---------- */
+.card table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tx2);
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+}
+.card table tbody tr { transition: background-color 0.12s ease; }
+.card table tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
+.card table td { vertical-align: middle; }
+
+/* ---------- Form controls: one height and rhythm everywhere ---------- */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select {
+  font-size: 14px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--w);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+}
+input::placeholder, textarea::placeholder { color: #6b6863; }
+input:not([type="checkbox"]):not([type="radio"]):hover,
+select:hover { border-color: rgba(255, 255, 255, 0.16); }
+select {
+  padding-right: 28px;
+  cursor: pointer;
+}
+button { cursor: pointer; }
+button:focus-visible { outline: 2px solid rgba(153, 51, 255, 0.6); outline-offset: 2px; }
+
+/* ---------- Light theme for new pieces ---------- */
+.light .tab:hover { background: rgba(0, 0, 0, 0.03); }
+.light .tab.active { color: #1c1c20; }
+.light .card table thead th { background: #fafafc; border-bottom-color: #e4e4ea; }
+.light .card table tbody tr:hover { background: #fafafc; }
+.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), .light select {
+  background-color: #ffffff;
+  border-color: #d8d8e0;
+  color: #1c1c20;
+}

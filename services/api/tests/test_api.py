@@ -934,3 +934,18 @@ def test_kill_switch_blocks_execution(auth_client):
     # allowed again
     r = client.post(f"/v1/scripts/{sid}/run", params={"device_id": dev_id})
     assert r.status_code == 201, r.text
+
+
+def test_audit_full_with_overdue_ticket(auth_client):
+    # Regression: SQLite returns naive datetimes; comparing them to an aware
+    # "now" used to raise TypeError and 500 the whole audit run.
+    client, org_id, _ = auth_client
+    r = client.post("/v1/tickets", json={"org_id": org_id, "title": "overdue", "priority": "urgent"})
+    assert r.status_code == 201, r.text
+    tid = r.json()["id"]
+    r = client.patch(f"/v1/tickets/{tid}", json={"due_at": "2020-01-01T00:00:00Z"})
+    assert r.status_code == 200, r.text
+    r = client.post("/v1/audits/run", params={"org_id": org_id, "kind": "full"})
+    assert r.status_code == 201, r.text
+    titles = [f["title"] for f in r.json()["findings"]]
+    assert any("SLA" in t for t in titles)
