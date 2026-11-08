@@ -9,6 +9,18 @@ function token() {
   return localStorage.getItem("proofos_token") || "";
 }
 
+// FastAPI validation errors return `detail` as a list of {msg, loc, ...}
+// objects rather than a string; rendering that directly as a React child
+// crashes the app, so always reduce it to displayable text first.
+function errorText(detail, fallback) {
+  if (!detail) return fallback;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d) => (typeof d === "string" ? d : d?.msg || JSON.stringify(d))).join("; ") || fallback;
+  }
+  return typeof detail === "object" ? detail.msg || JSON.stringify(detail) : String(detail);
+}
+
 function tokenClaims(value) {
   try {
     const encoded = value.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
@@ -319,7 +331,7 @@ export default function App() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.access_token) {
-        setErr(response.status === 401 ? "Email or password is incorrect." : (result.detail || "Sign-in failed. Please try again."));
+        setErr(response.status === 401 ? "Email or password is incorrect." : errorText(result.detail, "Sign-in failed. Please try again."));
         return;
       }
       await activateSession(result.access_token);
@@ -342,8 +354,8 @@ export default function App() {
         body: JSON.stringify({ email: resetEmail.trim() }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || "Could not request a password reset.");
-      setResetNotice(result.detail || "If an account matches that email, a password reset link will be sent.");
+      if (!response.ok) throw new Error(errorText(result.detail, "Could not request a password reset."));
+      setResetNotice(errorText(result.detail, "If an account matches that email, a password reset link will be sent."));
     } catch (e) {
       setResetError(e.message || "Could not reach the ProofOS server. Try again later.");
     } finally {
@@ -371,8 +383,8 @@ export default function App() {
         body: JSON.stringify({ token: resetToken, new_password: resetPassword }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || "This reset link is invalid or expired.");
-      setResetNotice(result.detail || "Password updated. You can now sign in.");
+      if (!response.ok) throw new Error(errorText(result.detail, "This reset link is invalid or expired."));
+      setResetNotice(errorText(result.detail, "Password updated. You can now sign in."));
       setLogin((current) => ({ ...current, password: "" }));
       setResetPassword("");
       setResetPasswordConfirm("");
@@ -405,7 +417,7 @@ export default function App() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.access_token) {
-        setErr(result.detail || "Workspace setup failed. Please try another name or sign in.");
+        setErr(errorText(result.detail, "Workspace setup failed. Please try another name or sign in."));
         return;
       }
       setOrgName(result.org.name);

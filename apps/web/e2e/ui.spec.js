@@ -2,9 +2,23 @@ import { test, expect } from "@playwright/test";
 
 async function bootstrap(page, org = "E2E UI Org") {
   await page.goto("/");
-  await page.getByLabel("Workspace name").fill(`${org} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // The signup form lives in a collapsed <details> panel on the sign-in page.
+  await page.locator("summary", { hasText: "New to ProofOS?" }).click();
+  await page.getByLabel("Workspace name").fill(`${org} ${unique}`);
+  await page.getByLabel("Administrator email").fill(`admin-${unique}@e2e-test.dev`);
+  await page.getByLabel("Administrator password").fill("At least 12 characters!");
+  await page.getByRole("button", { name: "Create workspace and sign in" }).click();
   await expect(page.getByText("Device health")).toBeVisible({ timeout: 25000 });
+}
+
+async function registerDevice(page, hostname) {
+  await page.getByRole("button", { name: "Devices", exact: true }).click();
+  await page.getByPlaceholder("hostname", { exact: true }).fill(hostname);
+  await page.getByPlaceholder("os", { exact: true }).fill("Linux");
+  await page.getByPlaceholder("ip", { exact: true }).fill("10.2.2.2");
+  await page.getByRole("button", { name: "Register" }).click();
+  await expect(page.getByText(hostname).first()).toBeVisible({ timeout: 15000 });
 }
 
 function trackErrors(page) {
@@ -20,8 +34,8 @@ function trackErrors(page) {
 
 test("bad credentials do not create or enter a workspace", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Email").fill("wrong@example.test");
-  await page.getByLabel("Password").fill("not-the-password");
+  await page.getByLabel("Email", { exact: true }).fill("wrong@e2e-test.dev");
+  await page.getByLabel("Password", { exact: true }).fill("not-the-password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("alert")).toContainText("Email or password is incorrect");
   await expect(page.getByRole("button", { name: "Logout" })).toHaveCount(0);
@@ -83,6 +97,7 @@ test("tickets: create, comment, start", async ({ page }) => {
 test("monitor + scripts + automations", async ({ page }) => {
   const errors = trackErrors(page);
   await bootstrap(page);
+  await registerDevice(page, "monitor-ws-01");
   await nav("Monitor")(page);
   await page.getByLabel("Device").selectOption({ index: 1 });
   await page.getByPlaceholder("10.0.0.1:443").fill("10.1.1.1:80");
@@ -112,10 +127,11 @@ test("AI copilot + admin (user, push)", async ({ page }) => {
   await expect(page.getByText(/engine:/)).toBeVisible({ timeout: 15000 });
 
   await nav("Admin")(page);
-  await page.getByPlaceholder("email").fill("engineer@proofos.dev");
+  const newUserEmail = `engineer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@e2e-test.dev`;
+  await page.getByPlaceholder("email").fill(newUserEmail);
   await page.getByPlaceholder("password (min 8)").fill("password123");
   await page.getByRole("button", { name: "Add user" }).click();
-  await expect(page.getByText("engineer@proofos.dev")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText(newUserEmail)).toBeVisible({ timeout: 10000 });
   expect(errors).toEqual([]);
 });
 
@@ -146,15 +162,17 @@ test("CMDB + knowledge + vault + changes + time", async ({ page }) => {
 
   await nav("Time")(page);
   await page.getByLabel("Minutes").fill("90");
-  await page.getByLabel("Notes").fill("onboarding");
+  await page.getByLabel("Notes").fill("onboarding time entry");
   await page.getByRole("button", { name: "Log time" }).click();
-  await expect(page.getByText("onboarding")).toBeVisible({ timeout: 10000 });
+  // Scope to <main> to avoid matching the "Onboarding" nav links (desktop + mobile).
+  await expect(page.locator("main").getByText("onboarding time entry")).toBeVisible({ timeout: 10000 });
   expect(errors).toEqual([]);
 });
 
 test("VMs + patches + onboarding + consulting + audit", async ({ page }) => {
   const errors = trackErrors(page);
   await bootstrap(page);
+  await registerDevice(page, "vm-host-01");
   await nav("VMs")(page);
   await page.getByPlaceholder("VM name").fill("dc-01");
   await page.locator("select").first().selectOption({ index: 1 });
@@ -177,7 +195,7 @@ test("VMs + patches + onboarding + consulting + audit", async ({ page }) => {
   await expect(page.getByText("net-migration").first()).toBeVisible({ timeout: 10000 });
 
   await nav("Audit")(page);
-  await page.getByRole("button", { name: "Run audit" }).click();
+  await page.getByRole("button", { name: "Run audit" }).first().click();
   await expect(page.getByText(/score|findings/i)).toBeVisible({ timeout: 15000 });
   expect(errors).toEqual([]);
 });
