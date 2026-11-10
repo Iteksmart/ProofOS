@@ -4,7 +4,7 @@ import os
 from functools import lru_cache
 from urllib.parse import urlsplit
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
 
@@ -63,8 +63,7 @@ class Settings(BaseSettings):
         ):
             raise ValueError("DATABASE_URL must use a strong PostgreSQL password (at least 24 characters)")
 
-    class Config:
-        extra = "ignore"
+    model_config = SettingsConfigDict(extra="ignore")
 
 
 @lru_cache

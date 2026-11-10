@@ -264,12 +264,12 @@ def reset_password(
     db: Session = Depends(get_db),
     _rl: None = Depends(rate_limit_password_reset),
 ):
-    from jose import JWTError
+    from jwt import PyJWTError
     from app.core.security import decode_token
 
     try:
         claims = decode_token(payload.token)
-    except JWTError:
+    except PyJWTError:
         raise HTTPException(status_code=400, detail="Password reset link is invalid or expired.")
     if claims.get("purpose") != "password_reset" or not str(claims.get("sub", "")).isdigit():
         raise HTTPException(status_code=400, detail="Password reset link is invalid or expired.")

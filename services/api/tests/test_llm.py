@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_proofos.db")
-os.environ.setdefault("JWT_SECRET", "test-secret-min-32-chars-long")
+os.environ.setdefault("JWT_SECRET", "test-secret-with-at-least-32-characters")
 os.environ.setdefault("PROOF_SIGNING_SEED_HEX", "00" * 32)
 
 import httpx

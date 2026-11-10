@@ -45,7 +45,7 @@ app.add_middleware(
 
 
 def current_org_id(request: Request) -> int:
-    from jose import JWTError, jwt
+    import jwt
 
     header = request.headers.get("authorization", "")
     if not header.lower().startswith("bearer "):
@@ -57,7 +57,7 @@ def current_org_id(request: Request) -> int:
         if not claims.get("sub"):
             raise ValueError("missing subject")
         return org_id
-    except (JWTError, KeyError, TypeError, ValueError):
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 

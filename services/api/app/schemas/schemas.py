@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 # --- Auth / Orgs ---
@@ -39,8 +39,7 @@ class OrgOut(BaseModel):
     id: int
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserCreate(BaseModel):
@@ -71,8 +70,7 @@ class UserOut(BaseModel):
     email: str
     role: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Devices ---
@@ -106,8 +104,7 @@ class DeviceOut(BaseModel):
     agent_version: str = ""
     last_seen: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DeviceCreateOut(DeviceOut):
@@ -124,8 +121,7 @@ class DeviceMetricOut(BaseModel):
     mem: float
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Tickets ---
@@ -166,8 +162,7 @@ class TicketOut(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Scripts ---
@@ -185,8 +180,7 @@ class ScriptOut(BaseModel):
     body: str
     version: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScriptRunOut(BaseModel):
@@ -200,8 +194,7 @@ class ScriptRunOut(BaseModel):
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RunComplete(BaseModel):
@@ -241,8 +234,7 @@ class AutomationOut(BaseModel):
     remediation_script_id: int | None = None
     enabled: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SimulateIn(BaseModel):
@@ -272,8 +264,7 @@ class CheckOut(BaseModel):
     latency_ms: float
     threshold_ms: float = 0.0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlertOut(BaseModel):
@@ -285,8 +276,7 @@ class AlertOut(BaseModel):
     message: str
     acked: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Proof ---
@@ -300,8 +290,7 @@ class ProofOut(BaseModel):
     anchored: bool = False
     anchor_commitment: str = ""
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProofVerifyOut(BaseModel):
@@ -350,8 +339,7 @@ class ApprovalOut(BaseModel):
     created_at: datetime | None = None
     decided_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Audit ---
@@ -363,8 +351,7 @@ class AuditFindingOut(BaseModel):
     title: str
     detail: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditOut(BaseModel):
@@ -375,8 +362,7 @@ class AuditOut(BaseModel):
     summary: str
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditRunOut(BaseModel):
@@ -394,8 +380,7 @@ class OnboardingStepOut(BaseModel):
     step_order: int
     done: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Consulting ---
@@ -418,8 +403,7 @@ class ClientProfileOut(BaseModel):
     status: str
     notes: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProjectCreate(BaseModel):
@@ -445,8 +429,7 @@ class ProjectOut(BaseModel):
     notes: str
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- CMDB / Knowledge / Vault / Time / Changes ---
@@ -468,8 +451,7 @@ class CiOut(BaseModel):
     description: str
     attributes: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ArticleCreate(BaseModel):
@@ -490,8 +472,7 @@ class ArticleOut(BaseModel):
     tags: str
     published: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SecretCreate(BaseModel):
@@ -509,8 +490,7 @@ class SecretOut(BaseModel):
     category: str
     notes: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TimeEntryCreate(BaseModel):
@@ -533,8 +513,7 @@ class TimeEntryOut(BaseModel):
     project_id: int | None = None
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChangeCreate(BaseModel):
@@ -566,8 +545,7 @@ class ChangeOut(BaseModel):
     status: str
     requester_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Integrations (metrics webhook) ---
@@ -587,8 +565,7 @@ class IntegrationMetricOut(BaseModel):
     host: str
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- VMs / Remote control ---
@@ -614,8 +591,7 @@ class VmOut(BaseModel):
     memory_mb: int
     notes: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RemoteSessionIn(BaseModel):
@@ -632,8 +608,7 @@ class RemoteSessionOut(BaseModel):
     status: str
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Patch management / SSO ---
@@ -658,8 +633,7 @@ class PatchOut(BaseModel):
     severity: str
     status: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SsoConfigIn(BaseModel):
@@ -677,8 +651,7 @@ class SsoConfigOut(BaseModel):
     metadata_url: str
     enabled: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PushRegister(BaseModel):
@@ -695,8 +668,7 @@ class PushDeviceOut(BaseModel):
     fcm_token: str
     platform: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Secure Workspace (encrypted enclave) ---
@@ -723,8 +695,7 @@ class EnclavePolicyOut(BaseModel):
     watermark_enabled: bool
     ai_governed: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EnclaveCreate(BaseModel):
@@ -744,8 +715,7 @@ class EnclaveOut(BaseModel):
     encryption_key_id: str
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EnclaveEventIn(BaseModel):
@@ -766,5 +736,4 @@ class EnclaveEventOut(BaseModel):
     source: str
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

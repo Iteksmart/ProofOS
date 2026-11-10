@@ -26,6 +26,7 @@ uvicorn app.main:app --reload --port 8113
 ## Test
 ```powershell
 cd D:\proofos\services\proof
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 

@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
       - name: Verify fresh database migration and model parity
         env:
           DATABASE_URL: sqlite:///./migration-ci.db
@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
       - name: Run tests
         run: python -m pytest -q
 
@@ -71,6 +71,28 @@ jobs:
         run: npm run build --workspace @proofos/web
       - name: Test web components
         run: npm test --workspace @proofos/web
+
+  dependency-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Audit Python runtime dependencies
+        run: |
+          pip install pip-audit
+          pip-audit -r services/api/requirements.txt
+          pip-audit -r services/proof/requirements.txt
+          pip-audit -r packages/mcp/requirements.txt
+      - name: Audit npm production dependencies
+        run: |
+          npm install
+          npm audit --omit=dev
 
   compose:
     name: Compose config

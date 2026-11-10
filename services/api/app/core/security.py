@@ -9,7 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -64,7 +65,7 @@ def create_password_reset_token(user) -> str:
 def verify_password_reset_token(token: str, user) -> bool:
     try:
         claims = decode_token(token)
-    except JWTError:
+    except PyJWTError:
         return False
     return (
         claims.get("purpose") == "password_reset"
@@ -89,7 +90,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Missing Authorization: Bearer <token>")
     try:
         claims = decode_token(token)
-    except JWTError:
+    except PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     sub = claims.get("sub")
     if not sub:
@@ -114,7 +115,7 @@ def get_optional_user(request: Request, db: Session = Depends(get_db)):
         return None
     try:
         claims = decode_token(token)
-    except JWTError:
+    except PyJWTError:
         return None
     sub = claims.get("sub")
     if not sub or not str(sub).isdigit():

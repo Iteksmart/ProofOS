@@ -19,6 +19,11 @@ class _Collector:
         self.findings.append({"category": category, "severity": severity, "title": title, "detail": detail})
 
 
+def _as_utc(value: dt.datetime) -> dt.datetime:
+    # PostgreSQL returns timezone-aware values, SQLite returns naive UTC.
+    return value if value.tzinfo else value.replace(tzinfo=dt.timezone.utc)
+
+
 def _score(findings: list[dict]) -> float:
     penalty = sum(SEVERITY_PENALTY.get(f["severity"], 1) for f in findings)
     return round(max(0.0, min(100.0, 100.0 - penalty)), 1)
@@ -34,7 +39,10 @@ def run_audit(db: Session, org_id: int, kind: str) -> tuple[list[dict], float]:
     alerts = db.query(Alert).filter(Alert.org_id == org_id).all()
     users = db.query(User).filter(User.org_id == org_id).all()
     automations = db.query(Automation).filter(Automation.org_id == org_id).all()
-    proofs = db.query(ProofRecord).filter(ProofRecord.org_id == org_id).order_by(ProofRecord.created_at.asc()).all()
+    # The ledger is one global hash chain, so links are only contiguous across
+    # all tenants; verify the whole chain and report this org's records.
+    ledger = db.query(ProofRecord).order_by(ProofRecord.created_at.asc()).all()
+    proofs = [p for p in ledger if p.org_id == org_id]
     steps = db.query(OnboardingStep).filter(OnboardingStep.org_id == org_id).all()
 
     if "security" in want:
@@ -51,13 +59,14 @@ def run_audit(db: Session, org_id: int, kind: str) -> tuple[list[dict], float]:
             c.add("security", "info", "No devices registered", "Onboard endpoints to begin monitoring.")
 
     if "compliance" in want:
-        now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)  # naive UTC to match DB `due_at`
-        breached = [t for t in tickets if t.due_at and t.due_at < now and t.status not in {"closed", "cancelled"}]
+        now = dt.datetime.now(dt.timezone.utc)
+        breached = [t for t in tickets if t.due_at and _as_utc(t.due_at) < now and t.status not in {"closed", "cancelled"}]
         if breached:
             c.add("compliance", "high", f"{len(breached)} ticket(s) breached SLA", ", ".join(f"#{t.id} {t.title}" for t in breached[:5]))
-        chain = verify_chain(proofs) if proofs else {"chain_ok": True, "count": 0}
-        if not chain["chain_ok"]:
-            c.add("compliance", "critical", "Proof hash-chain integrity broken", f"Broken links: {chain.get('broken_ids')}")
+        own_ids = {p.id for p in proofs}
+        broken = [rid for rid in verify_chain(ledger)["broken_ids"] if rid in own_ids]
+        if broken:
+            c.add("compliance", "critical", "Proof hash-chain integrity broken", f"Broken links: {broken}")
         if len(proofs) == 0:
             c.add("compliance", "info", "No proof records", "Writes emit proof automatically; none recorded yet.")
         c.add("compliance", "info", "Signing key is self-attested", "Receipts are verifiable; the key is embedded, not pinned to a CA/KMS.")

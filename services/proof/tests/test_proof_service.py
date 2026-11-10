@@ -60,7 +60,7 @@ def test_proof_service():
     Base.metadata.create_all(bind=engine)
 
     with TestClient(app) as c:
-        from jose import jwt
+        import jwt
 
         from app.config import get_settings
 

@@ -1,7 +1,7 @@
 """Dev seed: create a fully-populated demo client via the API. Idempotent-ish.
 
 Run with:  python seed.py
-Creates org "Acme Corp" + demo admin `demo@acme.dev / demo12345` and populates
+Creates org "Acme Corp" + demo admin `demo@acme.dev / DemoPassword123` and populates
 devices, tickets, monitoring, scripts, automations, approvals, CMDB, knowledge,
 secrets, changes, time, VMs, patches, onboarding, consulting, and metrics.
 Every API call emits a proof record, so the ledger is rich too.
@@ -271,7 +271,7 @@ def main() -> None:
     chain, _ = get("/v1/proof/chain", h)
     if isinstance(chain, dict):
         print(f"  proof chain: {chain.get('count', '?')} records")
-    print(f"\n✓ DEMO READY — login as {DEMO_ADMIN} / {DEMO_PASSWORD}")
+    print(f"\nDEMO READY - login as {DEMO_ADMIN} / {DEMO_PASSWORD}")
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ For production, use the hardened overlay and checklist in [docs/PRODUCTION.md](d
 ### Run without Docker (dev)
 ```powershell
 cd D:\proofos\services\api
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt   # add requirements-dev.txt to run the tests
 uvicorn app.main:app --reload --port 8000
 # frontend: cd ..\..\apps\web && npm install && npm run dev
 ```
