@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     itechsmart_prooflink_plus_url: str = os.getenv("ITECHSMART_PROOFLINK_PLUS_URL", "http://127.0.0.1:8610")
     itechsmart_ledger_url: str = os.getenv("ITECHSMART_LEDGER_URL", "http://127.0.0.1:8064")
     itechsmart_api_key: str = os.getenv("ITECHSMART_API_KEY", "")
+    # ProofLink Plus /seal is guarded by its own controlled-writer token (NOT the MCP key).
+    # Must equal the SEAL_TOKEN of the prooflinkplus service. Unset -> seal returns an honest 503.
+    itechsmart_seal_token: str = os.getenv("ITECHSMART_SEAL_TOKEN", "")
+    # iTechSmart ITSM (tickets). Reads are open on the loopback/internal network; pushing tickets
+    # into ITSM needs the suite SERVICE_TOKEN (ITECHSMART_ITSM_TOKEN) -> honest 503 when unset.
+    itechsmart_itsm_url: str = os.getenv("ITECHSMART_ITSM_URL", "http://127.0.0.1:8063")
+    itechsmart_itsm_token: str = os.getenv("ITECHSMART_ITSM_TOKEN", "")
     # Remote desktop providers (screen KVM). MeshCentral/VNC must be running on the endpoint.
     meshcentral_url: str = os.getenv("MESHCENTRAL_URL", "https://localhost:8096")
     vnc_port: int = int(os.getenv("VNC_PORT", "5900"))
@@ -106,6 +113,9 @@ class Settings(BaseSettings):
     omniroute_url: str = os.getenv("OMNIROUTE_URL", "http://localhost:20128")
     omniroute_key: str = os.getenv("OMNIROUTE_KEY", "")
     omniroute_model: str = os.getenv("OMNIROUTE_MODEL", "auto")
+    # iTechSmart AI bridge (AI_PROVIDER=bridge): OpenAI-compatible, holds the NVIDIA key itself, so ProofOS needs NO key.
+    ai_bridge_url: str = os.getenv("AI_BRIDGE_URL", "http://host.docker.internal:8089")
+    ai_bridge_model: str = os.getenv("AI_BRIDGE_MODEL", "nvidia/nemotron-3.5-super-vl-120b-a12b")
     # OpenRouter (https://openrouter.ai) — OpenAI-compatible, free-tier models use the ":free" suffix.
     openrouter_url: str = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1")
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")

@@ -50,7 +50,19 @@ class OpenAICompatClient:
         self.extra_headers = extra_headers or {}
 
     def is_configured(self) -> bool:
-        return bool(self.base_url) and bool(self.api_key)
+        # the bridge authenticates to NVIDIA itself, so it needs no key from us
+        return bool(self.base_url) and (bool(self.api_key) or self.provider == "bridge")
+
+    # which backend REALLY answered the last chat (bridge only: it silently falls back to other models when NVIDIA fails)
+    last_backend: str | None = None
+
+    def identity(self) -> dict:
+        """engine/model labels for API answers - truthful about fallbacks."""
+        if self.provider == "bridge":
+            if self.last_backend == "nvidia":
+                return {"engine": "nemotron-via-bridge", "model": self.model}
+            return {"engine": f"bridge-fallback-{self.last_backend or 'unknown'}", "model": "unknown (the bridge used a fallback model, not Nemotron)"}
+        return {"engine": self.provider, "model": self.model}
 
     def _headers(self) -> dict:
         h = {"Content-Type": "application/json"}
@@ -69,6 +81,8 @@ class OpenAICompatClient:
             r = client.post(f"{self.base_url}/chat/completions", headers=self._headers(), json=payload)
             r.raise_for_status()
             data = r.json()
+        if self.provider == "bridge":
+            self.last_backend = (data.get("x_bridge") or {}).get("backend")
         return data["choices"][0]["message"]["content"].strip()
 
     def models(self) -> list[dict]:
@@ -82,6 +96,14 @@ class OpenAICompatClient:
 def get_llm_client() -> OpenAICompatClient | None:
     """Return the client for `AI_PROVIDER`, or None when disabled (heuristic)."""
     provider = settings.ai_provider.lower()
+    if provider == "bridge":
+        return OpenAICompatClient(
+            base_url=f"{settings.ai_bridge_url.rstrip('/')}/v1",
+            api_key="",
+            model=settings.ai_bridge_model,
+            provider="bridge",
+            timeout=90.0,
+        )
     if provider == "omniroute":
         return OpenAICompatClient(
             base_url=f"{settings.omniroute_url.rstrip('/')}/v1",

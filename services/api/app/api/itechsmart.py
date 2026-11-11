@@ -57,17 +57,42 @@ def seal(body: dict, db: Session = Depends(get_db), user=Depends(require_role("a
     if rec.org_id is not None and rec.org_id != user.org_id:
         raise HTTPException(status_code=403, detail="receipt not in your org")
 
+    # Plus only accepts categories prefixed article12_ / tenant_; scope by ProofOS org.
     result = itechsmart.seal(
         {
-            "category": "proofos",
+            "category": "tenant_proofos",
             "actor": user.email,
-            "subject": rec.what,
+            "subject": str(rec.what)[:1900],
             "action": "seal",
             "outcome": "ok",
+            "tenant_id": str(rec.org_id if rec.org_id is not None else user.org_id),
             "details": {"proofos_receipt_id": rec.id, "digest": rec.payload_digest},
-            "human_input": True,
-            "auto_resolved": False,
         }
     )
-    emit(db, "itechsmart.sealed", {"proofos_receipt": rec.id, "result": result}, actor_of(user), {"org_id": rec.org_id}, {"reason": "ProofLink Plus seal"})
-    return {"proofos_receipt": rec.id, "sealed": result.get("ok", True), "result": result}
+    ok = bool(result.get("ok"))
+    emit(db, "itechsmart.sealed" if ok else "itechsmart.seal_failed", {"proofos_receipt": rec.id, "result": result}, actor_of(user), {"org_id": rec.org_id}, {"reason": "ProofLink Plus seal"})
+    if not ok:
+        status = result.get("status") if isinstance(result.get("status"), int) and result.get("status") >= 400 else 502
+        raise HTTPException(status_code=status, detail={"sealed": False, "proofos_receipt": rec.id, "error": result.get("error")})
+    return {"proofos_receipt": rec.id, "sealed": True, "result": result}
+
+
+from app.services import itsm_sync  # noqa: E402  (ITSM <-> ProofOS ticket bridge)
+
+
+@router.post("/itsm/sync")
+def itsm_sync_now(db: Session = Depends(get_db), user=Depends(require_role("admin", "manager"))):
+    """Import/refresh ITSM tickets into this org's ProofOS tickets (each change emits a proof receipt)."""
+    try:
+        return itsm_sync.sync(db, user)
+    except itsm_sync.ItsmError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+
+
+@router.post("/itsm/push/{ticket_id}")
+def itsm_push(ticket_id: int, db: Session = Depends(get_db), user=Depends(require_role("admin", "manager"))):
+    """Create the ITSM ticket for a ProofOS ticket and link them (needs ITECHSMART_ITSM_TOKEN)."""
+    try:
+        return itsm_sync.push(db, user, ticket_id)
+    except itsm_sync.ItsmError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)

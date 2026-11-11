@@ -181,6 +181,9 @@ def _fake_client(configured: bool, chat_result):
         def is_configured(self):
             return configured
 
+        def identity(self):
+            return {"engine": self.provider, "model": self.model}
+
         def chat(self, messages, model=None):
             if isinstance(chat_result, Exception):
                 raise chat_result

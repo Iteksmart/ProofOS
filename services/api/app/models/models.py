@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -523,3 +523,18 @@ class ChangeRequest(Base):
     requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class ItsmLink(Base):
+    """Maps an iTechSmart ITSM ticket (TKT-xxxxxx) to a ProofOS ticket, per org."""
+
+    __tablename__ = "itsm_links"
+    __table_args__ = (UniqueConstraint("org_id", "itsm_id", name="uq_itsm_links_org_itsm"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    itsm_id: Mapped[str] = mapped_column(String(40), index=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"), index=True)
+    itsm_status: Mapped[str] = mapped_column(String(20), default="open")
+    itsm_updated_at: Mapped[str] = mapped_column(String(40), default="")
+    receipt_id: Mapped[str] = mapped_column(String(80), default="")
+    last_synced_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)

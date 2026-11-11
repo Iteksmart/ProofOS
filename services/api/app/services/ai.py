@@ -129,7 +129,7 @@ def answer_query(db: Session, org_id: int, query: str) -> dict:
                 }
             ]
         )
-        return {"answer": text, "engine": client.provider, "model": client.model, "context": context}
+        return {"answer": text, **client.identity(), "context": context}
     except Exception as e:  # noqa: BLE001 - fall back rather than fail the copilot
         return {**heuristic, "engine": "heuristic", "fallback_reason": f"{client.provider} unavailable: {e}"}
 
@@ -171,7 +171,7 @@ def summarise(db: Session, org_id: int, scope: str = "open") -> dict:
                 }
             ]
         )
-        return {"summary": text, "scope": scope, "engine": client.provider, "model": client.model, "context": context}
+        return {"summary": text, "scope": scope, **client.identity(), "context": context}
     except Exception as e:  # noqa: BLE001
         return {**heuristic, "engine": "heuristic", "fallback_reason": f"{client.provider} unavailable: {e}"}
 

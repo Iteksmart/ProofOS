@@ -65,12 +65,28 @@ def chain(limit: int = 20) -> dict:
 
 
 def seal(payload: dict) -> dict:
-    """Seal a receipt on ProofLink Plus (requires ITECHSMART_API_KEY)."""
-    r = httpx.post(f"{settings.itechsmart_prooflink_plus_url}/seal", json=payload, headers=_headers(), timeout=20)
-    if r.status_code == 401:
-        return {"ok": False, "error": "unauthorized — set ITECHSMART_API_KEY", "status": 401}
-    r.raise_for_status()
-    return r.json()
+    """Seal a receipt on ProofLink Plus.
+
+    Auth is the Plus controlled-writer token (ITECHSMART_SEAL_TOKEN), not the MCP key.
+    Always returns a dict with ok True/False; never raises on upstream HTTP errors, and
+    never reports success for a receipt that was not actually written.
+    """
+    if not settings.itechsmart_seal_token:
+        return {"ok": False, "status": 503, "error": "ITECHSMART_SEAL_TOKEN not configured (must equal prooflinkplus SEAL_TOKEN)"}
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {settings.itechsmart_seal_token}"}
+    try:
+        r = httpx.post(f"{settings.itechsmart_prooflink_plus_url}/seal", json=payload, headers=headers, timeout=95)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "status": 502, "error": f"ProofLink Plus unreachable: {e}"}
+    try:
+        body = r.json()
+    except Exception:  # noqa: BLE001
+        body = {"raw": r.text[:300]}
+    if r.status_code >= 400:
+        return {"ok": False, "status": r.status_code, "error": body.get("detail") if isinstance(body, dict) else body}
+    if not (isinstance(body, dict) and body.get("receipt_id")):
+        return {"ok": False, "status": 502, "error": "ProofLink Plus returned no receipt_id", "body": body}
+    return {"ok": True, "receipt_id": body["receipt_id"], "hash": body.get("hash"), "chain_id": body.get("chain_id")}
 
 
 def mcp_call(tool: str, arguments: dict | None = None) -> dict:
