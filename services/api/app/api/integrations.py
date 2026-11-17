@@ -24,7 +24,7 @@ webhook_limiter = SlidingWindowLimiter(120, 60)
 
 class ConnectionIn(BaseModel):
     name: str = Field(min_length=2, max_length=100)
-    provider: Literal["metrics", "grafana", "alertmanager", "otlp"]
+    provider: Literal["metrics", "grafana", "alertmanager", "otlp", "email"]
 
 
 def connection_out(row):
@@ -88,6 +88,8 @@ async def webhook(connection_id: int, request: Request, db: Session = Depends(ge
         if len(body) > 262144:
             raise HTTPException(status_code=413, detail="webhook exceeds 256 KiB")
     import json
+    if row.provider == "email":
+        return _inbound_email(db, row, bytes(body), request.headers.get("content-type", ""))
     try:
         data = json.loads(body)
         if not isinstance(data, dict):
@@ -151,6 +153,40 @@ async def webhook(connection_id: int, request: Request, db: Session = Depends(ge
         {"actor_id": f"integration:{row.id}", "actor_type": "integration"}, {"org_id": row.org_id}, {"reason": "authenticated webhook delivery"})
     publish({"type": "integration", "org_id": row.org_id})
     return {"accepted": len(records)}
+
+
+def _inbound_email(db: Session, row: IntegrationConnection, body: bytes, content_type: str) -> dict:
+    """Inbound mail parse webhook: JSON (Postmark, generic) or form-encoded (Mailgun, SendGrid)."""
+    import json
+    from urllib.parse import parse_qs
+
+    from app.services import inbound_email
+
+    try:
+        if "application/x-www-form-urlencoded" in content_type:
+            data = {k: v[0] for k, v in parse_qs(body.decode("utf-8"), keep_blank_values=True).items()}
+        else:
+            data = json.loads(body)
+        if not isinstance(data, dict):
+            raise ValueError("object required")
+        result = inbound_email.ingest(db, row, data)
+    except (ValueError, TypeError, UnicodeDecodeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"invalid inbound email: {exc}") from exc
+    db.query(IntegrationConnection).filter(IntegrationConnection.id == row.id).update({
+        IntegrationConnection.received_count: IntegrationConnection.received_count + 1,
+        IntegrationConnection.last_received_at: dt.datetime.now(dt.timezone.utc)})
+    db.commit()
+    if result["action"] != "duplicate":
+        emit(db, f"ticket.email.{result['action']}", {k: v for k, v in result.items() if k != "action"},
+            {"actor_id": f"integration:{row.id}", "actor_type": "integration"}, {"org_id": row.org_id, "ticket_id": result["ticket_id"]},
+            {"reason": "inbound customer email"})
+        publish({"type": "ticket", "org_id": row.org_id})
+    if result["action"] == "created":
+        from app.services.automation_engine import evaluate
+
+        evaluate(db, row.org_id, "ticket.opened", {"ticket_id": result["ticket_id"], "priority": "normal", "status": "open"})
+    return result
 
 
 def _scope(user, org_id: int) -> None:

@@ -150,8 +150,9 @@ class TicketUpdate(BaseModel):
 
 
 class TicketCommentCreate(BaseModel):
-    body: str = Field(min_length=1)
-    author: str = ""
+    body: str = Field(min_length=1, max_length=20000)
+    author: str = Field(default="", max_length=255)
+    public: bool = False  # True sends the reply to the customer portal; False keeps it an internal note
 
 
 class TicketOut(BaseModel):
@@ -165,6 +166,7 @@ class TicketOut(BaseModel):
     assignee: str
     device_id: int | None = None
     customer_id: int | None = None
+    requester_email: str = ""
     due_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

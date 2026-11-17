@@ -37,8 +37,10 @@ def service_context(db, org_id, device_id):
         reach = topology.impact(db, org_id, node.id)
         errors = db.query(TelemetryEvent).filter(TelemetryEvent.org_id == org_id, TelemetryEvent.service == node.name,
             TelemetryEvent.severity.in_(["ERROR", "FATAL", "CRITICAL"])).order_by(TelemetryEvent.id.desc()).limit(5).all()
+        causes = topology.probable_causes(db, org_id, node.id)["candidates"][:3]
         out.append({"service": node.name, "dependents": [d["name"] for d in reach["dependents"]],
             "dependencies": [d["name"] for d in reach["dependencies"]],
+            "probable_causes": [{"service": c["name"], "health": c["health"], "why": c["why"]} for c in causes],
             "recent_errors": [{"kind": e.kind, "name": e.name, "body": e.body[:300], "observed_at": str(e.observed_at)} for e in errors]})
     return out
 

@@ -120,3 +120,9 @@ def delete_dependency(edge_id: int, db: Session = Depends(get_db), user=Depends(
 def get_impact(node_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     _node(db, user, node_id)
     return topology.impact(db, user.org_id, node_id)
+
+
+@router.get("/probable-cause/{node_id}")
+def get_probable_cause(node_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _node(db, user, node_id)
+    return topology.probable_causes(db, user.org_id, node_id)

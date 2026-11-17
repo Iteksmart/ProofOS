@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DataTable, Empty, Metrics, PageHead, Status } from "./Operations";
+import { ProbableCause } from "./Assurance";
 
 const date = (value) => (value ? new Date(value).toLocaleString() : "—");
 const tone = (health) => ({ healthy: "good", degraded: "warn", down: "bad" }[health] || "neutral");
@@ -123,6 +124,7 @@ export function TopologyPage({ api, devices, canWrite, onOpenDevice }) {
               <h3 className="ops-section-title mt-4">It depends on</h3>
               {impact ? (impact.dependencies.length ? <ul className="topo-list">{impact.dependencies.map((d) => <li key={d.id}><button onClick={() => setSelected(d.id)}>{d.name}</button></li>)}</ul> : <p className="ops-muted">No recorded dependencies.</p>) : null}
               {impact && <p className="ops-muted mt-3">{impact.scope}</p>}
+              {node.health !== "healthy" && <ProbableCause api={api} nodeId={node.id} onSelect={setSelected} />}
               {canWrite && <button className="btn-danger rounded-lg px-3 py-2 text-xs mt-4" onClick={() => { if (window.confirm(`Remove ${node.name} and its dependencies from the map?`)) act(async () => { await api(`/v1/topology/services/${node.id}`, { method: "DELETE" }); setSelected(null); }); }}>Remove service</button>}
             </> : <><h2>Impact analysis</h2><p className="ops-muted">Select a service to see what it depends on and what breaks if it fails.</p><div className="topo-legend"><span><i className="trace" />Observed in traces</span><span><i className="manual" />Declared manually</span></div></>}
           </aside>

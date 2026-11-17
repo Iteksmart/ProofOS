@@ -31,6 +31,8 @@ class Software(BaseModel):
     name: str = Field(min_length=1, max_length=500)
     version: str = Field(default="", max_length=255)
     publisher: str = Field(default="", max_length=500)
+    source: str = Field(default="", max_length=255)
+    source_version: str = Field(default="", max_length=255)
 
 
 class InventoryIn(BaseModel):
@@ -41,4 +43,5 @@ class InventoryIn(BaseModel):
     networks: list[Network] = Field(default_factory=list, max_length=1024)
     software: list[Software] = Field(default_factory=list, max_length=5000)
     software_status: Literal["complete", "partial", "unavailable"] = "unavailable"
+    os_release: dict[str, str] = Field(default_factory=dict, max_length=10)
     errors: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=30)

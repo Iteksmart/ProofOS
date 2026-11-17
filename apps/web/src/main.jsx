@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { PortalApp } from "./Assurance";
 import "./index.css";
 
 class ErrorBoundary extends React.Component {
@@ -35,7 +36,7 @@ class ErrorBoundary extends React.Component {
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      {window.location.pathname === "/portal" ? <PortalApp apiBase={import.meta.env.VITE_API_URL ?? "http://localhost:8000"} /> : <App />}
     </ErrorBoundary>
   </React.StrictMode>
 );

@@ -61,6 +61,7 @@ class Ticket(Base):
     assignee: Mapped[str] = mapped_column(String(255), default="", index=True)
     device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id"), nullable=True, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
+    requester_email: Mapped[str] = mapped_column(String(255), default="", index=True)
     due_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
@@ -119,6 +120,7 @@ class TicketComment(Base):
     org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
     author: Mapped[str] = mapped_column(String(255), default="")
     body: Mapped[str] = mapped_column(Text)
+    public: Mapped[bool] = mapped_column(Boolean, default=False)  # visible to the customer in the portal
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -744,4 +746,69 @@ class Invoice(Base):
     lines: Mapped[str] = mapped_column(Text, default="[]")
     total: Mapped[float] = mapped_column(Float, default=0.0)
     proof_id: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ProofAnchor(Base):
+    """An RFC 3161 timestamp from an independent authority over the proof-chain head."""
+
+    __tablename__ = "proof_anchors"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chain_head: Mapped[str] = mapped_column(String(64), index=True)
+    last_record_id: Mapped[str] = mapped_column(String(32))
+    record_count: Mapped[int] = mapped_column(Integer)
+    imprint: Mapped[str] = mapped_column(String(64))
+    tsa_url: Mapped[str] = mapped_column(String(500))
+    token: Mapped[str] = mapped_column(Text)
+    gen_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class VulnerabilityFinding(Base):
+    """A known vulnerability (OSV) affecting software installed on an endpoint."""
+
+    __tablename__ = "vulnerability_findings"
+    __table_args__ = (UniqueConstraint("device_id", "vuln_id", "package", name="uq_vuln_device_package"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    package: Mapped[str] = mapped_column(String(255))
+    version: Mapped[str] = mapped_column(String(255), default="")
+    ecosystem: Mapped[str] = mapped_column(String(100), default="")
+    vuln_id: Mapped[str] = mapped_column(String(100), index=True)
+    aliases: Mapped[str] = mapped_column(Text, default="[]")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[str] = mapped_column(String(20), default="unknown", index=True)
+    fixed_version: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)  # open | resolved
+    first_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ServiceSlo(Base):
+    """Error-rate and latency objectives for a service, evaluated against telemetry."""
+
+    __tablename__ = "service_slos"
+    __table_args__ = (UniqueConstraint("org_id", "service", name="uq_slo_org_service"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    service: Mapped[str] = mapped_column(String(255))
+    max_error_rate: Mapped[float] = mapped_column(Float, default=0.01)
+    max_p95_ms: Mapped[float] = mapped_column(Float, default=0.0)  # 0 = no latency objective
+    window_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    min_requests: Mapped[int] = mapped_column(Integer, default=20)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PortalLink(Base):
+    """A revocable, expiring link that lets a customer contact see their tickets and invoices."""
+
+    __tablename__ = "portal_links"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    contact_email: Mapped[str] = mapped_column(String(255), default="")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)

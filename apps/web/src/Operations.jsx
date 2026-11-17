@@ -102,6 +102,7 @@ const providers = {
   metrics: { name: "Custom metrics", description: "Connect scripts and monitoring tools through a named metrics webhook.", icon: "↗", sample: { metrics: [{ name: "connection.test", value: 1, host: "proofos-test" }] } },
   grafana: { name: "Grafana Alerting", description: "Bring firing and resolved Grafana alerts into your operations queue.", icon: "◉", sample: { status: "firing", alerts: [{ labels: { alertname: "Integration test", severity: "info" }, annotations: { summary: "ProofOS webhook test" } }] } },
   alertmanager: { name: "Prometheus Alertmanager", description: "Receive Alertmanager webhook notifications with severity and context.", icon: "△", sample: { status: "firing", alerts: [{ labels: { alertname: "Integration test", severity: "info" }, annotations: { summary: "ProofOS webhook test" } }] } },
+  email: { name: "Inbound email", description: "Turn support email into tickets. Point your mail provider's inbound webhook (Postmark, Mailgun, SendGrid) here; replies with [#id] in the subject thread onto the ticket.", icon: "✉", sample: { from: "user@customer.example", subject: "ProofOS inbound email test", text: "Connection test from ProofOS. You can close this ticket." } },
   otlp: { name: "OpenTelemetry", description: "Receive logs and traces over OTLP/HTTP JSON. Traces also build your service map.", icon: "≋", testPath: "/v1/logs", sample: { resourceLogs: [{ resource: { attributes: [{ key: "service.name", value: { stringValue: "proofos-test" } }] }, scopeLogs: [{ logRecords: [{ severityText: "INFO", body: { stringValue: "ProofOS connection test" } }] }] }] } },
 };
 
@@ -125,7 +126,7 @@ export function IntegrationsPage({ api, orgId, apiBase }) {
     try {
       const response = await fetch(`${apiBase}${created.webhook_path}${providers[created.provider].testPath || ""}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Integration-Token": created.token }, body: JSON.stringify(providers[created.provider].sample) });
       if (!response.ok) throw new Error(`Webhook test failed (${response.status})`);
-      setNotice(created.provider === "otlp" ? "Delivery accepted. A labeled test log record is now in Telemetry." : "Delivery accepted. A labeled test record was added to metrics or alerts."); await load();
+      setNotice(created.provider === "otlp" ? "Delivery accepted. A labeled test log record is now in Telemetry." : created.provider === "email" ? "Delivery accepted. A labeled test ticket was opened in Tickets." : "Delivery accepted. A labeled test record was added to metrics or alerts."); await load();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
   return <div className="ops-page">

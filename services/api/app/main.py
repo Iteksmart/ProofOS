@@ -19,6 +19,7 @@ from app.api import reports, search
 from app.api import investigations
 from app.api import access, fleet, recovery, telemetry, topology
 from app.api import billing, customers, patching, thresholds
+from app.api import anchors, portal, slos, vulnerabilities
 
 settings = get_settings()
 logging.basicConfig(
@@ -86,6 +87,72 @@ async def _patch_policy_loop() -> None:
             log.warning("patch policy scheduler error: %s", e)
 
 
+async def _anchor_loop() -> None:
+    """Timestamp the ledger head with an independent authority on a fixed interval."""
+    import os
+
+    from app.core.db import SessionLocal
+    from app.services.anchoring import anchor_now
+
+    minutes = int(os.getenv("PROOF_ANCHOR_INTERVAL_MINUTES", "60"))
+    if minutes <= 0:
+        return
+    while True:
+        await asyncio.sleep(minutes * 60)
+        try:
+            db = SessionLocal()
+            try:
+                await asyncio.to_thread(anchor_now, db)
+            finally:
+                db.close()
+        except Exception as e:  # noqa: BLE001 - an unreachable authority must not stop the API
+            log.warning("proof anchoring failed: %s", e)
+
+
+async def _vulnerability_loop() -> None:
+    """Re-match every tenant's installed software against OSV once a day (configurable)."""
+    import os
+
+    from app.core.db import SessionLocal
+    from app.models.models import Org
+    from app.services.vulnerabilities import scan
+
+    hours = float(os.getenv("VULN_SCAN_INTERVAL_HOURS", "24"))
+    if hours <= 0:
+        return
+    while True:
+        await asyncio.sleep(hours * 3600)
+        db = SessionLocal()
+        try:
+            for org_id in [o.id for o in db.query(Org).all()]:
+                try:
+                    await asyncio.to_thread(scan, db, org_id)
+                except Exception as e:  # noqa: BLE001 - OSV outages must not stop the API
+                    db.rollback()
+                    log.warning("vulnerability scan failed org=%s: %s", org_id, e)
+        finally:
+            db.close()
+
+
+async def _slo_loop() -> None:
+    """Evaluate every SLO each minute so error-budget burn pages promptly."""
+    from app.core.db import SessionLocal
+    from app.models.models import ServiceSlo
+    from app.services.slo import check
+
+    while True:
+        await asyncio.sleep(60)
+        db = SessionLocal()
+        try:
+            for org_id in {o for (o,) in db.query(ServiceSlo.org_id).distinct().all()}:
+                await asyncio.to_thread(check, db, org_id)
+        except Exception as e:  # noqa: BLE001
+            db.rollback()
+            log.warning("SLO evaluation failed: %s", e)
+        finally:
+            db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.validate_production()
@@ -93,11 +160,17 @@ async def lifespan(app: FastAPI):
     broadcast = asyncio.create_task(_broadcast_loop())
     status_sync = asyncio.create_task(_status_sync_loop())
     patch_scheduler = asyncio.create_task(_patch_policy_loop())
+    anchor_scheduler = asyncio.create_task(_anchor_loop())
+    vuln_scheduler = asyncio.create_task(_vulnerability_loop())
+    slo_scheduler = asyncio.create_task(_slo_loop())
     log.info("ProofOS API ready env=%s db_ok=%s", settings.api_env, check_db())
     yield
     broadcast.cancel()
     status_sync.cancel()
     patch_scheduler.cancel()
+    anchor_scheduler.cancel()
+    vuln_scheduler.cancel()
+    slo_scheduler.cancel()
 
 
 from app.services.kill_switch import KillSwitchEngaged
@@ -275,6 +348,10 @@ app.include_router(patching.router, prefix="/v1/patching", tags=["patching"])
 app.include_router(thresholds.router, prefix="/v1/thresholds", tags=["thresholds"])
 app.include_router(customers.router, prefix="/v1/customers", tags=["customers"])
 app.include_router(billing.router, prefix="/v1/billing", tags=["billing"])
+app.include_router(anchors.router, prefix="/v1/anchors", tags=["anchors"])
+app.include_router(vulnerabilities.router, prefix="/v1/vulnerabilities", tags=["vulnerabilities"])
+app.include_router(portal.router, prefix="/v1/portal", tags=["portal"])
+app.include_router(slos.router, prefix="/v1/slos", tags=["slos"])
 app.include_router(telemetry.router, prefix="/v1/telemetry", tags=["telemetry"])
 app.include_router(itechsmart.router, prefix="/v1/itechsmart", tags=["itechsmart"])
 app.include_router(mcp_registry.router, prefix="/v1/mcp", tags=["mcp"])

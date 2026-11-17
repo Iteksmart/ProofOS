@@ -6,6 +6,7 @@ import InvestigationPanel from "./InvestigationPanel";
 import { AccessPage, RecoveryPanel, TelemetryPage, TopologyPage } from "./Evidence";
 import { AgentInstall, NetworkDiscovery, PatchCenter, ThresholdsPanel } from "./Rmm";
 import { BillingPage, CustomersPage, TicketAssist } from "./Psa";
+import { AnchorsPanel, SloPanel, VulnerabilitiesPage } from "./Assurance";
 
 // Production nginx proxies /v1 to the API, so an empty build value keeps all
 // browser traffic on the current origin. Local Vite dev keeps localhost:8000.
@@ -123,6 +124,7 @@ const ICONS = {
   automations: "M13 3 5 14h6l-1 7 8-11h-6z",
   vms: "M12 3 3 8l9 5 9-5z M3 12l9 5 9-5 M3 16l9 5 9-5",
   patches: "M12 3v12 M7 10l5 5 5-5 M4 20h16",
+  vulnerabilities: "M12 3 4 6v6c0 4.4 3.4 7.6 8 9 4.6-1.4 8-4.6 8-9V6z M12 8v5 M12 16h.01",
   proof: "M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6z M9 12l2 2 4-4",
   audit: "M9 4h6v3H9z M7 5H5v16h14V5h-2 M9 14l2 2 4-4",
   changes: "M4 8h13 M14 5l3 3-3 3 M20 16H7 M10 13l-3 3 3 3",
@@ -229,6 +231,7 @@ export default function App() {
   const [selTicket, setSelTicket] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
+  const [commentPublic, setCommentPublic] = useState(false);
   const [selScript, setSelScript] = useState(null);
   const [runOutput, setRunOutput] = useState("");
   const [editAuto, setEditAuto] = useState(null);
@@ -614,8 +617,9 @@ export default function App() {
   async function addComment() {
     if (!selTicket || !commentText.trim()) return;
     try {
-      await api(`/v1/tickets/${selTicket.id}/comments`, { method: "POST", body: JSON.stringify({ body: commentText }) });
+      await api(`/v1/tickets/${selTicket.id}/comments`, { method: "POST", body: JSON.stringify({ body: commentText, public: commentPublic }) });
       setCommentText("");
+      setCommentPublic(false);
       openTicket(selTicket.id);
     } catch (e) {
       setErr(e.message);
@@ -869,14 +873,14 @@ export default function App() {
     ["monitor", "Monitor"], ["scripts", "Scripts"], ["automations", "Automations"],
     ["proof", "Proof"], ["ai", "AI Copilot"], ["admin", "Admin"],
     ["cmdb", "CMDB"], ["customers", "Customers"], ["billing", "Billing"], ["knowledge", "Knowledge"], ["vault", "Vault"], ["changes", "Changes"], ["time", "Time"],
-    ["vms", "VMs"], ["patches", "Patches"], ["enclaves", "Workspaces"], ["itechsmart", "iTechSmart"],
+    ["vms", "VMs"], ["patches", "Patches"], ["vulnerabilities", "Vulnerabilities"], ["enclaves", "Workspaces"], ["itechsmart", "iTechSmart"],
     ["audit", "Audit"], ["onboarding", "Onboarding"], ["consulting", "Consulting"],
     ["inventory", "Inventory"], ["integrations", "Integrations"], ["reports", "Reports"],
     ["topology", "Topology"], ["telemetry", "Telemetry"], ["access", "Access"],
   ];
   const navGroups = [
     { label: "Workspace", ids: ["dash", "reports", "analytics"] },
-    { label: "Operations", ids: ["devices", "inventory", "monitor", "topology", "telemetry", "tickets", "scripts", "automations", "vms", "patches"] },
+    { label: "Operations", ids: ["devices", "inventory", "monitor", "topology", "telemetry", "tickets", "scripts", "automations", "vms", "patches", "vulnerabilities"] },
     { label: "Governance", ids: ["proof", "audit", "access", "changes", "vault", "enclaves"] },
     { label: "Service delivery", ids: ["customers", "billing", "knowledge", "cmdb", "time", "onboarding", "consulting"] },
     { label: "Platform", ids: ["ai", "integrations", "admin", "itechsmart"] },
@@ -951,12 +955,13 @@ export default function App() {
             <select aria-label="Navigate workspace" value={view} onChange={(e) => setView(e.target.value)}>{navGroups.map((g) => <optgroup key={g.label} label={g.label}>{g.items.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</optgroup>)}</select><button className="ops-button" onClick={() => setCommandOpen(true)}><Icon name="search" />Search</button>
           </nav>
           <main id="workspace-main" className={`workspace-main p-4 md:p-6 grid gap-6 view-${view}`}>
-        {!["dash", "inventory", "integrations", "reports", "topology", "telemetry", "access", "customers", "billing"].includes(view) && <div className="workspace-page-title"><div><p className="ops-eyebrow">{activeGroup}</p><h1>{activeLabel === "Devices" ? "Your endpoint workspace" : activeLabel}</h1><p>{pageDescriptions[view] || `Manage ${activeLabel.toLowerCase()} across your operations workspace.`}</p></div>{view === "devices" && <button className="ops-button" onClick={() => setView("inventory")}>Explore inventory <span aria-hidden="true">↗</span></button>}</div>}
+        {!["dash", "inventory", "integrations", "reports", "topology", "telemetry", "access", "customers", "billing", "vulnerabilities"].includes(view) && <div className="workspace-page-title"><div><p className="ops-eyebrow">{activeGroup}</p><h1>{activeLabel === "Devices" ? "Your endpoint workspace" : activeLabel}</h1><p>{pageDescriptions[view] || `Manage ${activeLabel.toLowerCase()} across your operations workspace.`}</p></div>{view === "devices" && <button className="ops-button" onClick={() => setView("inventory")}>Explore inventory <span aria-hidden="true">↗</span></button>}</div>}
         {view === "inventory" && <InventoryPage api={api} orgId={orgId} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
         {view === "integrations" && <IntegrationsPage api={api} orgId={orgId} apiBase={API} />}
         {view === "reports" && <ReportsPage api={api} orgId={orgId} apiBase={API} onNavigate={setView} />}
         {view === "topology" && <TopologyPage api={api} devices={devices} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
-        {view === "telemetry" && <TelemetryPage api={api} onNavigate={setView} />}
+        {view === "telemetry" && <><TelemetryPage api={api} onNavigate={setView} /><SloPanel api={api} canWrite={canWrite} /></>}
+        {view === "vulnerabilities" && <VulnerabilitiesPage api={api} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
         {view === "customers" && <CustomersPage api={api} devices={devices} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} onChanged={() => { load(); loadCustomers(); }} />}
         {view === "billing" && <BillingPage api={api} apiBase={API} canWrite={canWrite} />}
         {view === "access" && <AccessPage api={api} orgId={orgId} devices={devices} users={users} claims={claims} />}
@@ -1347,7 +1352,7 @@ export default function App() {
                     {comments.length === 0 && <p className="text-xs text-slate-500">No comments.</p>}
                     {comments.map((c) => (
                       <div key={c.id} className="text-sm bg-slate-950 border border-slate-800 rounded p-2">
-                        <div className="text-xs text-slate-500">{c.author || "unknown"} · {c.created_at}</div>
+                        <div className="text-xs text-slate-500">{c.author || "unknown"} · {c.created_at} · {c.public ? <span className="text-emerald-400">visible to customer</span> : "internal note"}</div>
                         <div>{c.body}</div>
                       </div>
                     ))}
@@ -1356,6 +1361,7 @@ export default function App() {
                     <input className={inputCls} placeholder="Add a comment…" value={commentText} onChange={(e) => setCommentText(e.target.value)} />
                     <button className="bg-violet-600 px-3 py-2 rounded text-sm" onClick={addComment}>Post</button>
                   </div>
+                  <label className="flex items-center gap-2 text-xs text-slate-400 mt-1"><input type="checkbox" checked={commentPublic} onChange={(e) => setCommentPublic(e.target.checked)} />Reply to customer (shown in their portal{selTicket.requester_email ? ` · requested by ${selTicket.requester_email}` : ""})</label>
                 </div>
                 {["open", "in_progress", "pending"].includes(selTicket.status) && (
                   <button className="text-xs text-violet-400 hover:underline" onClick={async () => { await api(`/v1/tickets/${selTicket.id}/close`, { method: "POST", body: "{}" }); openTicket(selTicket.id); load(); }}>Close ticket</button>
@@ -1366,8 +1372,9 @@ export default function App() {
               {tickets.map((t) => (
                 <tr key={t.id}>
                   <td className="px-4 py-3 text-slate-500">#{t.id}</td>
-                  <td className="px-4 py-3 cursor-pointer hover:text-violet-300" onClick={() => openTicket(t.id)}>
-                    <div className="font-medium">{t.title}</div><div className="text-xs text-slate-500">{t.body}</div>
+                  <td className="px-4 py-3">
+                    <button type="button" className="font-medium text-left hover:text-violet-300" onClick={() => openTicket(t.id)}>{t.title}</button>
+                    <div className="text-xs text-slate-500">{t.requester_email ? `${t.requester_email} · ` : ""}{t.body}</div>
                   </td>
                   <td className="px-4 py-3">{t.status}</td>
                   <td className="px-4 py-3"><HealthPill status={t.severity} /></td>
@@ -1549,6 +1556,7 @@ export default function App() {
 
         {view === "proof" && (
           <>
+            <AnchorsPanel api={api} apiBase={API} canWrite={canWrite} authToken={authToken} />
             {verifyResult && <p className="text-xs bg-slate-900 border border-slate-800 rounded p-3 break-all">{verifyResult}</p>}
             <Table head={["ID", "What", "Digest", "Actions"]}>
               {proofs.map((p) => (

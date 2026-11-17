@@ -105,6 +105,44 @@ def _walk(start: int, adjacency: dict[int, list[int]]) -> list[int]:
     return seen
 
 
+def probable_causes(db: Session, org_id: int, node_id: int) -> dict:
+    """Rank the service and everything it depends on by how likely each is to be the origin of a failure.
+
+    An unhealthy dependency whose own dependencies are healthy is the strongest candidate: the
+    failure starts there and propagates up. Ranking uses only recorded evidence.
+    """
+    edges = db.query(ServiceDependency).filter(ServiceDependency.org_id == org_id).all()
+    callees: dict[int, list[int]] = {}
+    for edge in edges:
+        callees.setdefault(edge.source_id, []).append(edge.target_id)
+    depth = {node_id: 0}
+    queue = [node_id]
+    while queue:
+        current = queue.pop(0)
+        for nxt in callees.get(current, []):
+            if nxt not in depth:
+                depth[nxt] = depth[current] + 1
+                queue.append(nxt)
+    nodes = db.query(ServiceNode).filter(ServiceNode.org_id == org_id, ServiceNode.id.in_(list(depth))).all()
+    health = node_health(db, org_id, nodes)
+    unhealthy = {n.id for n in nodes if health[n.id]["state"] in {"degraded", "down"}}
+    ranked = []
+    for node in nodes:
+        state = health[node.id]["state"]
+        if node.id not in unhealthy:
+            continue
+        below = set(_walk(node.id, callees))
+        origin = not (below & unhealthy)  # nothing it depends on is failing
+        score = _RANK[state] * 10 + (25 if origin else 0) + depth[node.id]
+        ranked.append({"id": node.id, "name": node.name, "health": state, "depth": depth[node.id], "score": score,
+            "origin": origin, "evidence": health[node.id]["evidence"],
+            "why": ("no failing dependency below it, so the failure most likely starts here" if origin
+                else "it is failing, but something it depends on is failing too")})
+    ranked.sort(key=lambda r: -r["score"])
+    return {"service_id": node_id, "candidates": ranked,
+        "scope": "Ranked from telemetry, endpoint status and recorded dependency edges; services without evidence are not ranked."}
+
+
 def impact(db: Session, org_id: int, node_id: int) -> dict:
     """Who is affected if this service fails (dependents) and what it needs (dependencies)."""
     edges = db.query(ServiceDependency).filter(ServiceDependency.org_id == org_id).all()

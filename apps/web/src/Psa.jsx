@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { DataTable, Empty, Metrics, PageHead, Status } from "./Operations";
+import { PortalLinks } from "./Assurance";
 
 const money = (v) => (v == null ? "—" : new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(v));
 const contractLabel = (c) => !c ? "No contract" : c.kind === "hourly" ? `Hourly · ${money(c.hourly_rate)}/h` : c.kind === "retainer" ? `Retainer · ${money(c.monthly_fee)}/mo, ${c.included_hours} h included` : `Fixed · ${money(c.monthly_fee)}/mo`;
@@ -46,6 +47,7 @@ function CustomerDetail({ api, id, devices, canWrite, onOpenDevice, onChanged, o
       <h3 className="ops-section-title">Endpoints ({c.devices.length})</h3>
       {c.devices.length ? <div className="chip-row">{c.devices.map((d) => <button key={d.id} className="device-chip" onClick={() => onOpenDevice(d.id)}><i className={d.status} />{d.hostname}</button>)}</div> : <p className="ops-muted">No endpoints assigned.</p>}
       {canWrite && unassigned.length > 0 && <form className="inline-fields" onSubmit={(e) => { e.preventDefault(); if (assign) act(async () => { await api(`/v1/customers/${c.id}/devices`, { method: "POST", body: JSON.stringify({ device_ids: [Number(assign)] }) }); setAssign(""); }); }}><label>Assign an endpoint<select value={assign} onChange={(e) => setAssign(e.target.value)}><option value="">Choose…</option>{unassigned.map((d) => <option key={d.id} value={d.id}>{d.hostname}</option>)}</select></label><button className="ops-button" type="submit" disabled={!assign}>Assign</button></form>}
+      <PortalLinks api={api} customerId={c.id} contacts={c.contacts} canWrite={canWrite} />
       <h3 className="ops-section-title">Recent tickets</h3>
       {c.tickets.length ? <ul className="contact-list">{c.tickets.slice(0, 8).map((t) => <li key={t.id}><strong>#{t.id} · {t.title}</strong><small>{t.priority} priority</small><Status tone={["closed", "resolved"].includes(t.status) ? "good" : "warn"}>{t.status.replace("_", " ")}</Status></li>)}</ul> : <p className="ops-muted">No tickets for this customer.</p>}
     </section>

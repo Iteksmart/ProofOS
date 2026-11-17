@@ -53,7 +53,7 @@ def software_inventory() -> list[dict]:
     else:
         import shutil
         if shutil.which("dpkg-query"):
-            cmd = ["dpkg-query", "-W", "-f=${Package}\t${Version}\n"]
+            cmd = ["dpkg-query", "-W", "-f=${Package}\t${Version}\t${source:Package}\t${source:Version}\n"]
         elif shutil.which("rpm"):
             cmd = ["rpm", "-qa", "--qf", "%{NAME}\t%{VERSION}-%{RELEASE}\n"]
         elif platform.system() == "Darwin":
@@ -68,10 +68,22 @@ def software_inventory() -> list[dict]:
                     packages[(name, version)] = {"name": name[:500], "version": version[:255], "publisher": ""}
         else:
             for line in result.stdout.splitlines():
-                name, _, version = line.partition("\t")
+                fields = line.split("\t")
+                name, version = fields[0], fields[1] if len(fields) > 1 else ""
                 if name:
-                    packages[(name, version)] = {"name": name[:500], "version": version[:255], "publisher": ""}
+                    packages[(name, version)] = {"name": name[:500], "version": version[:255], "publisher": "",
+                        "source": (fields[2] if len(fields) > 2 else "")[:255], "source_version": (fields[3] if len(fields) > 3 else "")[:255]}
     return sorted(packages.values(), key=lambda p: p["name"].lower())
+
+
+def os_release() -> dict:
+    """Distribution id and version from /etc/os-release, used to match OSV advisories."""
+    try:
+        with open("/etc/os-release", encoding="utf-8") as handle:
+            pairs = dict(line.rstrip("\n").split("=", 1) for line in handle if "=" in line)
+    except OSError:
+        return {}
+    return {key.lower(): pairs[key].strip('"')[:100] for key in ("ID", "VERSION_ID") if key in pairs}
 
 
 def detailed_inventory() -> dict:
@@ -81,7 +93,7 @@ def detailed_inventory() -> dict:
         "physical_cores": psutil.cpu_count(logical=False), "logical_cores": psutil.cpu_count(),
         "memory_bytes": psutil.virtual_memory().total,
         "boot_time": dt.datetime.fromtimestamp(psutil.boot_time(), dt.timezone.utc).isoformat()},
-        "disks": [], "networks": [], "software": [], "errors": [], "software_status": "unavailable"}
+        "disks": [], "networks": [], "software": [], "errors": [], "software_status": "unavailable", "os_release": os_release()}
     if platform.system() == "Linux":
         from pathlib import Path
         for field, filename in (("manufacturer", "sys_vendor"), ("model", "product_name")):

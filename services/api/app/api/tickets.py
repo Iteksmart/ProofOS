@@ -191,8 +191,9 @@ def list_comments(tid: int, db: Session = Depends(get_db), user=Depends(get_curr
     _scope(user, t.org_id)
     rows = db.query(TicketComment).filter(TicketComment.ticket_id == tid).all()
     return [
-        {"id": r.id, "ticket_id": r.ticket_id, "author": r.author, "body": r.body, "created_at": r.created_at.isoformat() if r.created_at else None}
-        for r in rows
+        {"id": r.id, "ticket_id": r.ticket_id, "author": r.author, "body": r.body, "public": bool(r.public),
+         "created_at": r.created_at.isoformat() if r.created_at else None}
+        for r in sorted(rows, key=lambda r: r.id)
     ]
 
 
@@ -205,6 +206,7 @@ def add_comment(tid: int, payload: TicketCommentCreate, db: Session = Depends(ge
         org_id=t.org_id,
         author=payload.author or user.email,
         body=payload.body,
+        public=payload.public,
     )
     db.add(c)
     db.commit()
@@ -212,9 +214,9 @@ def add_comment(tid: int, payload: TicketCommentCreate, db: Session = Depends(ge
     emit(
         db,
         "ticket.comment",
-        {"ticket_id": tid, "comment_id": c.id},
+        {"ticket_id": tid, "comment_id": c.id, "public": c.public},
         actor_of(user),
         {"org_id": t.org_id, "ticket_id": tid},
         {"reason": "comment"},
     )
-    return {"id": c.id, "ticket_id": c.ticket_id, "author": c.author, "body": c.body}
+    return {"id": c.id, "ticket_id": c.ticket_id, "author": c.author, "body": c.body, "public": c.public}
