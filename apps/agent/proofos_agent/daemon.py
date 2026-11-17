@@ -25,6 +25,7 @@ class Agent:
         self.http = httpx.Client(base_url=cfg.api.rstrip("/"), timeout=20, verify=cfg.verify(),
             headers={"X-Agent-Token": cfg.token, "User-Agent": f"proofos-agent/{__version__}"})
         self.wake = threading.Event()
+        self.update_now = threading.Event()
         self.stop = threading.Event()
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, cfg.max_concurrency), thread_name_prefix="job")
         self.running: dict[int, executor.Running] = {}
@@ -77,6 +78,10 @@ class Agent:
 
     def _on_push(self, msg: dict) -> None:
         if msg.get("type") == "jobs":
+            self.wake.set()
+        elif msg.get("type") == "update":
+            log.info("update check requested by the server")
+            self.update_now.set()
             self.wake.set()
         elif msg.get("type") == "cancel" and isinstance(msg.get("run_id"), int):
             handle = self.running.get(msg["run_id"])
@@ -169,7 +174,8 @@ class Agent:
         data = inventory.inventory()
         self.http.post(f"/v1/devices/{self.cfg.device_id}/heartbeat", json={"cpu": data["cpu"], "disk": data["disk"],
             "mem": data["mem"], "status": "online", "agent_version": __version__,
-            "reboot_required": inventory.reboot_required()}).raise_for_status()
+            "reboot_required": inventory.reboot_required(), "agent_locked": self.state.locked,
+            "agent_spooled": len(self.state.spooled())}).raise_for_status()
 
     def run_forever(self) -> int:
         log.info("ProofOS agent %s device=%s api=%s", __version__, self.cfg.device_id, self.cfg.api)
@@ -196,7 +202,8 @@ class Agent:
                     # With a live push channel, polling is only a safety net.
                     next_poll = now + (120 if self._ws is not None else self.cfg.interval)
                 self.flush_spool()
-                if self.cfg.auto_update and now >= next_update:
+                if (self.cfg.auto_update and now >= next_update) or self.update_now.is_set():
+                    self.update_now.clear()
                     next_update = now + 6 * 3600
                     if updater.apply_if_newer(self.http, self.cfg.server_key) and not self.running:
                         log.info("update installed; exiting so the service manager restarts the new version")

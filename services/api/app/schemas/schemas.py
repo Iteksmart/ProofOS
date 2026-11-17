@@ -90,6 +90,8 @@ class DeviceHeartbeat(BaseModel):
     status: str = "online"
     agent_version: str = ""
     reboot_required: bool | None = None
+    agent_locked: bool | None = None
+    agent_spooled: int | None = Field(default=None, ge=0, le=1000000)
 
 
 class DeviceOut(BaseModel):

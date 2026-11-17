@@ -772,3 +772,8 @@ tr.row-selected td { background: var(--acc-soft); }
 .command-meta { display: flex; gap: 8px; align-items: center; }
 .command-run pre { margin: 0; padding: 10px; max-height: 320px; overflow: auto; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; background: oklch(0.13 0.01 275); color: oklch(0.9 0.01 275); }
 @media (max-width: 640px) { .command-input { flex-wrap: wrap; } .command-input textarea { flex-basis: 100%; } }
+
+/* Agents page */
+.agent-bulk { display: grid; gap: 10px; }
+.node-runs { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); margin-top: 10px; }
+.node-runs .command-run pre { max-height: 220px; }

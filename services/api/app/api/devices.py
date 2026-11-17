@@ -276,6 +276,10 @@ def heartbeat(device_id: int, payload: DeviceHeartbeat, db: Session = Depends(ge
         dev.agent_version = payload.agent_version
     if payload.reboot_required is not None:
         dev.reboot_required = payload.reboot_required
+    if payload.agent_locked is not None:
+        dev.agent_locked = payload.agent_locked
+    if payload.agent_spooled is not None:
+        dev.agent_spooled = payload.agent_spooled
     dev.last_seen = datetime.now(timezone.utc)
     db.add(DeviceMetric(org_id=dev.org_id, device_id=dev.id, cpu=dev.cpu, disk=dev.disk, mem=dev.mem))
     db.commit()

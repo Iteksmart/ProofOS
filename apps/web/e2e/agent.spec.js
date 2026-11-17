@@ -53,3 +53,59 @@ test("command console streams agent output live and can cancel a running command
   await expect(run.getByText("cancelled", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("agents page shows fleet health and runs one command on many nodes", async ({ page, request }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("dialog", (dialog) => dialog.accept());
+  const auth = await (await request.post(`${API}/v1/auth/bootstrap`, { data: { name: `Fleet QA ${Date.now()}` } })).json();
+  const headers = { Authorization: `Bearer ${auth.access_token}` };
+  const make = async (hostname, version, extra = {}) => {
+    const d = await (await request.post(`${API}/v1/devices`, { headers, data: { org_id: auth.org.id, hostname, os: "Ubuntu 24.04" } })).json();
+    if (version) await request.post(`${API}/v1/devices/${d.id}/heartbeat`, { headers: { "X-Agent-Token": d.device_secret }, data: { agent_version: version, ...extra } });
+    return d;
+  };
+  const web = await make("FLEET-WEB-01", "2.1.0");
+  const db = await make("FLEET-DB-01", "2.0.0", { agent_spooled: 2 });
+  await make("FLEET-NEW-01", null);
+
+  await page.goto("/");
+  await page.evaluate((a) => { localStorage.setItem("proofos_token", a.access_token); localStorage.setItem("proofos_org", String(a.org.id)); localStorage.setItem("proofos_orgname", a.org.name); }, auth);
+  await page.reload();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "Agents", exact: true }).filter({ visible: true }).first().click();
+  await expect(page.getByRole("heading", { name: "Every agent, one place." })).toBeVisible();
+  const row = (name) => page.getByRole("row").filter({ hasText: name });
+  await expect(row("FLEET-DB-01")).toContainText("update available");
+  await expect(row("FLEET-DB-01")).toContainText("2 results waiting to send");
+  await expect(row("FLEET-NEW-01")).toContainText("Install agent");
+
+  await page.getByRole("button", { name: "Outdated" }).click();
+  await expect(row("FLEET-WEB-01")).toHaveCount(0);
+  await page.getByRole("button", { name: "All", exact: true }).click();
+
+  await page.getByLabel("Select FLEET-WEB-01").check();
+  await page.getByLabel("Select FLEET-DB-01").check();
+  const bulk = page.getByRole("region", { name: "Bulk agent actions" });
+  await bulk.getByLabel("Command for selected agents").fill("uptime");
+  await bulk.getByRole("button", { name: "Run on 2" }).click();
+  const results = page.getByRole("region", { name: "Multi-node results" });
+  await expect(results.getByText("waiting for agent")).toHaveCount(2);
+  for (const [device, out] of [[web, "up 3 days"], [db, "up 9 days"]]) {
+    const agent = { "X-Agent-Token": device.device_secret };
+    const env = (await (await request.get(`${API}/v1/agent/jobs?device_id=${device.id}`, { headers: agent })).json()).jobs[0].envelope;
+    await request.post(`${API}/v1/agent/runs/${env.run_id}/start`, { headers: agent });
+    await request.post(`${API}/v1/scripts/runs/${env.run_id}/complete`, { headers: agent, data: { output: out, exit_code: 0 } });
+  }
+  await expect(results.getByRole("article", { name: "Result FLEET-WEB-01" })).toContainText("up 3 days");
+  await expect(results.getByRole("article", { name: "Result FLEET-DB-01" })).toContainText("up 9 days");
+  await expect(results.getByText("2 of 2 finished · 2 succeeded")).toBeVisible();
+
+  await page.getByLabel("Select FLEET-WEB-01").uncheck();
+  await bulk.getByRole("button", { name: "Block remote execution" }).click();
+  await expect(row("FLEET-DB-01")).toContainText("blocked by policy");
+  await bulk.getByLabel("Command for selected agents").fill("whoami");
+  await bulk.getByRole("button", { name: "Run on 1" }).click();
+  await expect(results.getByText("remote execution is disabled for this endpoint")).toBeVisible();
+  expect(errors).toEqual([]);
+});

@@ -69,9 +69,16 @@ def envelope(run: ScriptRun, script: Script) -> dict:
 def pending_jobs(db: Session, device_id: int) -> list[dict]:
     now = dt.datetime.now(dt.timezone.utc)
     jobs = []
+    from app.models.models import Device
+
+    device = db.get(Device, device_id)
     for run in db.query(ScriptRun).filter(ScriptRun.device_id == device_id, ScriptRun.status == "pending").order_by(ScriptRun.id).all():
         if _aware(run.created_at) + JOB_TTL < now:
             run.status, run.completed_at = "expired", now
+            continue
+        if device is not None and not device.agent_exec_enabled:
+            run.status, run.completed_at = "cancelled", now
+            run.output = "[blocked: remote execution is disabled for this endpoint by server policy]"
             continue
         script = db.get(Script, run.script_id)
         if script:

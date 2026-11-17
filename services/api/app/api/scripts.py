@@ -235,6 +235,8 @@ def queue_run(script_id: int, device_id: int, db: Session = Depends(get_db), use
     dev = db.query(Device).filter(Device.id == device_id, Device.org_id == s.org_id).first()
     if not dev:
         raise HTTPException(status_code=404, detail="device not found")
+    if not dev.agent_exec_enabled:
+        raise HTTPException(status_code=409, detail="remote execution is disabled for this endpoint")
     run = ScriptRun(org_id=s.org_id, device_id=device_id, script_id=script_id, status="pending")
     db.add(run)
     db.commit()

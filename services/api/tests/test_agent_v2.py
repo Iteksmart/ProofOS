@@ -98,7 +98,7 @@ def test_release_is_signed_and_matches_download(client):
     manifest = {k: info[k] for k in ("purpose", "version", "sha256", "size")}
     _verify(key, manifest, info["signature"])
     data = client.get("/v1/agent/download").content
-    assert hashlib.sha256(data).hexdigest() == info["sha256"] and len(data) == info["size"] and info["version"] == "2.0.0"
+    assert hashlib.sha256(data).hexdigest() == info["sha256"] and len(data) == info["size"] and info["version"] == "2.1.0"
 
 
 def test_published_agent_matches_source():
@@ -107,3 +107,45 @@ def test_published_agent_matches_source():
 
     build = runpy.run_path(str(pathlib.Path(__file__).resolve().parents[3] / "apps" / "agent" / "build.py"))
     assert build["PUBLISHED"].read_bytes() == build["build"](), "run python apps/agent/build.py"
+
+
+def test_fleet_view_policy_bulk_exec_and_update(auth_client):
+    c, org_id, _ = auth_client
+    a, a_agent = _device(c, org_id, "fleet-a")
+    b, b_agent = _device(c, org_id, "fleet-b")
+    bare, _ = _device(c, org_id, "fleet-noagent")
+    c.post(f"/v1/devices/{a['id']}/heartbeat", headers=a_agent, json={"agent_version": "2.1.0", "agent_locked": False, "agent_spooled": 0})
+    c.post(f"/v1/devices/{b['id']}/heartbeat", headers=b_agent, json={"agent_version": "2.0.0", "agent_locked": True, "agent_spooled": 3})
+
+    with c.websocket_connect(f"/v1/agent/ws?device_id={a['id']}", headers=a_agent) as ws:
+        assert json.loads(ws.receive_text()) == {"type": "jobs"}
+        ws.send_text(json.dumps({"type": "hello", "version": "2.1.0"}))
+        ws.send_text(json.dumps({"type": "ping"}))
+        json.loads(ws.receive_text())
+        fleet = c.get("/v1/agent/fleet").json()
+        rows = {r["hostname"]: r for r in fleet["agents"]}
+        assert fleet["latest_version"] == "2.1.0"
+        assert rows["fleet-a"]["push_connected"] and rows["fleet-a"]["health"] == "healthy" and not rows["fleet-a"]["outdated"]
+        assert rows["fleet-b"]["outdated"] and rows["fleet-b"]["locked"] and rows["fleet-b"]["spooled"] == 3 and rows["fleet-b"]["health"] == "restricted"
+        assert rows["fleet-noagent"]["health"] == "not_installed"
+
+        update = c.post("/v1/agent/fleet/update", json={"device_ids": [a["id"], b["id"]]}).json()
+        assert update == {"notified": [a["id"]], "not_connected": [b["id"]]}
+        assert json.loads(ws.receive_text()) == {"type": "update"}
+
+        result = c.post("/v1/agent/fleet/exec", json={"device_ids": [a["id"], b["id"]], "body": "uptime"}).json()["results"]
+        assert all(r["ok"] for r in result)
+        assert json.loads(ws.receive_text()) == {"type": "jobs"}
+
+    # Server policy blocks every queue path and cancels jobs already queued.
+    assert c.post("/v1/agent/fleet/policy", json={"device_ids": [b["id"]], "exec_enabled": False}).json()["updated"] == 1
+    assert c.get(f"/v1/agent/jobs?device_id={b['id']}", headers=b_agent).json()["jobs"] == []
+    blocked = c.post("/v1/agent/fleet/exec", json={"device_ids": [a["id"], b["id"]], "body": "whoami"}).json()["results"]
+    assert [r["ok"] for r in blocked] == [True, False] and "disabled" in blocked[1]["error"]
+    assert c.post(f"/v1/devices/{b['id']}/command", json={"body": "id", "description": "t"}).status_code == 409
+    assert c.get("/v1/agent/fleet").json()["summary"]["restricted"] == 1
+
+    assert c.post("/v1/agent/fleet/exec", json={"device_ids": [999999], "body": "x"}).status_code == 404
+    other = c.post("/v1/auth/bootstrap", json={"name": "Other fleet tenant"}).json()
+    assert c.get("/v1/agent/fleet", headers={"Authorization": f"Bearer {other['access_token']}"}).json()["agents"] == []
+    assert c.post("/v1/agent/fleet/policy", headers={"Authorization": f"Bearer {other['access_token']}"}, json={"device_ids": [a["id"]], "exec_enabled": False}).status_code == 404

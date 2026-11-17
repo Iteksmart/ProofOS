@@ -44,6 +44,9 @@ class Device(Base):
     last_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
     agent_version: Mapped[str] = mapped_column(String(50), default="")
     secret_hash: Mapped[str] = mapped_column(String(64), default="")
+    agent_locked: Mapped[bool] = mapped_column(Boolean, default=False)  # local lockdown reported by the agent
+    agent_spooled: Mapped[int] = mapped_column(Integer, default=0)  # results waiting on the endpoint
+    agent_exec_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # server-side remote execution policy
     reboot_required: Mapped[bool] = mapped_column(Boolean, default=False)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)

@@ -19,7 +19,7 @@ from app.api import reports, search
 from app.api import investigations
 from app.api import access, fleet, recovery, telemetry, topology
 from app.api import billing, customers, patching, thresholds
-from app.api import agent, anchors, portal, slos, vulnerabilities
+from app.api import agent, agent_fleet, anchors, portal, slos, vulnerabilities
 
 settings = get_settings()
 logging.basicConfig(
@@ -352,6 +352,7 @@ app.include_router(anchors.router, prefix="/v1/anchors", tags=["anchors"])
 app.include_router(vulnerabilities.router, prefix="/v1/vulnerabilities", tags=["vulnerabilities"])
 app.include_router(portal.router, prefix="/v1/portal", tags=["portal"])
 app.include_router(slos.router, prefix="/v1/slos", tags=["slos"])
+app.include_router(agent_fleet.router, prefix="/v1/agent/fleet", tags=["agent"])
 app.include_router(agent.router, prefix="/v1/agent", tags=["agent"])
 app.include_router(telemetry.router, prefix="/v1/telemetry", tags=["telemetry"])
 app.include_router(itechsmart.router, prefix="/v1/itechsmart", tags=["itechsmart"])

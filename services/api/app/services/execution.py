@@ -16,8 +16,11 @@ from app.services import kill_switch
 def queue_command(db: Session, org_id: int, device_id: int, body: str, who: dict, approval_id: int | None = None) -> ScriptRun:
     """Queue an ad-hoc shell command for a device's agent (via the script queue)."""
     kill_switch.require_disengaged(db)
-    if not db.query(Device).filter(Device.id == device_id, Device.org_id == org_id).first():
+    dev = db.query(Device).filter(Device.id == device_id, Device.org_id == org_id).first()
+    if not dev:
         raise HTTPException(status_code=404, detail="device not found in organization")
+    if not dev.agent_exec_enabled:
+        raise HTTPException(status_code=409, detail="remote execution is disabled for this endpoint")
     s = Script(org_id=org_id, name=f"adhoc-{int(time.time())}", body=body, version="1.0.0")
     db.add(s)
     db.flush()

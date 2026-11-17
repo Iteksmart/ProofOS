@@ -7,6 +7,7 @@ import { AccessPage, RecoveryPanel, TelemetryPage, TopologyPage } from "./Eviden
 import { AgentInstall, CommandConsole, NetworkDiscovery, PatchCenter, ThresholdsPanel } from "./Rmm";
 import { BillingPage, CustomersPage, TicketAssist } from "./Psa";
 import { AnchorsPanel, SloPanel, VulnerabilitiesPage } from "./Assurance";
+import { AgentsPage } from "./Agents";
 
 // Production nginx proxies /v1 to the API, so an empty build value keeps all
 // browser traffic on the current origin. Local Vite dev keeps localhost:8000.
@@ -124,6 +125,7 @@ const ICONS = {
   automations: "M13 3 5 14h6l-1 7 8-11h-6z",
   vms: "M12 3 3 8l9 5 9-5z M3 12l9 5 9-5 M3 16l9 5 9-5",
   patches: "M12 3v12 M7 10l5 5 5-5 M4 20h16",
+  agents: "M7 7h10v10H7z M10 3v4 M14 3v4 M10 17v4 M14 17v4 M3 10h4 M3 14h4 M17 10h4 M17 14h4",
   vulnerabilities: "M12 3 4 6v6c0 4.4 3.4 7.6 8 9 4.6-1.4 8-4.6 8-9V6z M12 8v5 M12 16h.01",
   proof: "M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6z M9 12l2 2 4-4",
   audit: "M9 4h6v3H9z M7 5H5v16h14V5h-2 M9 14l2 2 4-4",
@@ -869,7 +871,7 @@ export default function App() {
   const recentActivity = proofs.slice(0, 8);
 
   const nav = [
-    ["dash", "Overview"], ["analytics", "Analytics"], ["devices", "Devices"], ["tickets", "Tickets"],
+    ["dash", "Overview"], ["analytics", "Analytics"], ["devices", "Devices"], ["agents", "Agents"], ["tickets", "Tickets"],
     ["monitor", "Monitor"], ["scripts", "Scripts"], ["automations", "Automations"],
     ["proof", "Proof"], ["ai", "AI Copilot"], ["admin", "Admin"],
     ["cmdb", "CMDB"], ["customers", "Customers"], ["billing", "Billing"], ["knowledge", "Knowledge"], ["vault", "Vault"], ["changes", "Changes"], ["time", "Time"],
@@ -880,7 +882,7 @@ export default function App() {
   ];
   const navGroups = [
     { label: "Workspace", ids: ["dash", "reports", "analytics"] },
-    { label: "Operations", ids: ["devices", "inventory", "monitor", "topology", "telemetry", "tickets", "scripts", "automations", "vms", "patches", "vulnerabilities"] },
+    { label: "Operations", ids: ["devices", "agents", "inventory", "monitor", "topology", "telemetry", "tickets", "scripts", "automations", "vms", "patches", "vulnerabilities"] },
     { label: "Governance", ids: ["proof", "audit", "access", "changes", "vault", "enclaves"] },
     { label: "Service delivery", ids: ["customers", "billing", "knowledge", "cmdb", "time", "onboarding", "consulting"] },
     { label: "Platform", ids: ["ai", "integrations", "admin", "itechsmart"] },
@@ -955,12 +957,13 @@ export default function App() {
             <select aria-label="Navigate workspace" value={view} onChange={(e) => setView(e.target.value)}>{navGroups.map((g) => <optgroup key={g.label} label={g.label}>{g.items.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</optgroup>)}</select><button className="ops-button" onClick={() => setCommandOpen(true)}><Icon name="search" />Search</button>
           </nav>
           <main id="workspace-main" className={`workspace-main p-4 md:p-6 grid gap-6 view-${view}`}>
-        {!["dash", "inventory", "integrations", "reports", "topology", "telemetry", "access", "customers", "billing", "vulnerabilities"].includes(view) && <div className="workspace-page-title"><div><p className="ops-eyebrow">{activeGroup}</p><h1>{activeLabel === "Devices" ? "Your endpoint workspace" : activeLabel}</h1><p>{pageDescriptions[view] || `Manage ${activeLabel.toLowerCase()} across your operations workspace.`}</p></div>{view === "devices" && <button className="ops-button" onClick={() => setView("inventory")}>Explore inventory <span aria-hidden="true">↗</span></button>}</div>}
+        {!["dash", "inventory", "integrations", "reports", "topology", "telemetry", "access", "customers", "billing", "vulnerabilities", "agents"].includes(view) && <div className="workspace-page-title"><div><p className="ops-eyebrow">{activeGroup}</p><h1>{activeLabel === "Devices" ? "Your endpoint workspace" : activeLabel}</h1><p>{pageDescriptions[view] || `Manage ${activeLabel.toLowerCase()} across your operations workspace.`}</p></div>{view === "devices" && <button className="ops-button" onClick={() => setView("inventory")}>Explore inventory <span aria-hidden="true">↗</span></button>}</div>}
         {view === "inventory" && <InventoryPage api={api} orgId={orgId} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
         {view === "integrations" && <IntegrationsPage api={api} orgId={orgId} apiBase={API} />}
         {view === "reports" && <ReportsPage api={api} orgId={orgId} apiBase={API} onNavigate={setView} />}
         {view === "topology" && <TopologyPage api={api} devices={devices} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
         {view === "telemetry" && <><TelemetryPage api={api} onNavigate={setView} /><SloPanel api={api} canWrite={canWrite} /></>}
+        {view === "agents" && <AgentsPage api={api} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id).then(() => setDevicePanelTab("operations")); }} onInstall={async (id) => { const d = devices.find((x) => x.id === id); if (!window.confirm(`Generate a new enrollment secret for ${d?.hostname}? Any agent using the old secret stops working.`)) return; const j = await api(`/v1/devices/${id}/rotate-secret`, { method: "POST", body: "{}" }); setView("devices"); setEnrolled({ id, hostname: d?.hostname, os: d?.os, device_secret: j.device_secret }); }} />}
         {view === "vulnerabilities" && <VulnerabilitiesPage api={api} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
         {view === "customers" && <CustomersPage api={api} devices={devices} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} onChanged={() => { load(); loadCustomers(); }} />}
         {view === "billing" && <BillingPage api={api} apiBase={API} canWrite={canWrite} />}
