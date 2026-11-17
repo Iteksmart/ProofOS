@@ -17,7 +17,7 @@ from app.core.db import check_db, init_db
 from app.core.security import decode_token
 from app.api import reports, search
 from app.api import investigations
-from app.api import access, recovery, telemetry, topology
+from app.api import access, fleet, recovery, telemetry, topology
 
 settings = get_settings()
 logging.basicConfig(
@@ -251,6 +251,7 @@ app.include_router(investigations.router, prefix="/v1/ai", tags=["investigations
 app.include_router(access.router, prefix="/v1/access", tags=["privileged access"])
 app.include_router(recovery.router, prefix="/v1/recovery", tags=["recovery"])
 app.include_router(topology.router, prefix="/v1/topology", tags=["topology"])
+app.include_router(fleet.router, prefix="/v1/fleet", tags=["fleet"])
 app.include_router(telemetry.router, prefix="/v1/telemetry", tags=["telemetry"])
 app.include_router(itechsmart.router, prefix="/v1/itechsmart", tags=["itechsmart"])
 app.include_router(mcp_registry.router, prefix="/v1/mcp", tags=["mcp"])

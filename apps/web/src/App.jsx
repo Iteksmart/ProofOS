@@ -200,6 +200,12 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [setupCredentials, setSetupCredentials] = useState(null);
   const [search, setSearch] = useState("");
+  const [fleetText, setFleetText] = useState("");
+  const [fleetQuery, setFleetQuery] = useState(null);
+  const [fleetBusy, setFleetBusy] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulk, setBulk] = useState({ script_id: "", title: "", priority: "normal" });
+  const [bulkResult, setBulkResult] = useState(null);
   const [verifyResult, setVerifyResult] = useState("");
   const [aiQuery, setAiQuery] = useState("Summarise offline devices");
   const [aiResult, setAiResult] = useState("");
@@ -563,6 +569,8 @@ export default function App() {
 
   async function openDevice(id) {
     setErr("");
+    // Reopening the device already shown must not discard the tab the user picked meanwhile.
+    const sameDevice = selDevice?.id === id;
     try {
       const [dev, m, p, inventory] = await Promise.all([
         api(`/v1/devices/${id}`),
@@ -574,8 +582,10 @@ export default function App() {
       setDeviceMetrics(Array.isArray(m) ? m : []);
       setDeviceInventory(inventory);
       setDevicePatches(Array.isArray(p) ? p : []);
-      setDevicePanelTab("overview");
-      setRemoteSession(null);
+      if (!sameDevice) {
+        setDevicePanelTab("overview");
+        setRemoteSession(null);
+      }
     } catch (e) {
       setErr(e.message);
     }
@@ -829,7 +839,7 @@ export default function App() {
     if (p.severity === "critical") bucket.critical += 1;
   });
   const matchesStatus = (d) => deviceStatusFilter === "all" || (deviceStatusFilter === "online" ? d.status === "online" : deviceStatusFilter === "attention" ? d.status !== "online" : deviceStatusFilter === "patches" ? Boolean(patchesByDevice[d.id]) : Boolean(alertsByDevice[d.id]));
-  const filteredDevices = devices.filter((d) => d.hostname.toLowerCase().includes(search.toLowerCase()) && (!deviceTypeFilter || d.device_type === deviceTypeFilter) && matchesStatus(d));
+  const filteredDevices = devices.filter((d) => (!fleetQuery || fleetQuery.ids.has(d.id)) && d.hostname.toLowerCase().includes(search.toLowerCase()) && (!deviceTypeFilter || d.device_type === deviceTypeFilter) && matchesStatus(d));
   const isBreached = (t) => t.due_at && new Date(t.due_at) < Date.now() && !["closed", "cancelled"].includes(t.status);
 
   const deviceHealth = [
@@ -1093,6 +1103,25 @@ export default function App() {
 
         {view === "devices" && (
           <>
+            <form className="fleet-query" onSubmit={async (e) => {
+              e.preventDefault();
+              if (fleetText.trim().length < 2) { setFleetQuery(null); return; }
+              setFleetBusy(true);
+              try {
+                const r = await api(`/v1/fleet/query?q=${encodeURIComponent(fleetText.trim())}`);
+                setFleetQuery({ ids: new Set(r.device_ids), understood: r.understood, ignored: r.ignored, count: r.device_ids.length });
+                setSelectedIds(new Set());
+              } catch (e) { setErr(e.message); } finally { setFleetBusy(false); }
+            }}>
+              <span className="fleet-query-icon" aria-hidden="true"><Icon name="ai" /></span>
+              <input aria-label="Describe the endpoints you want" value={fleetText} onChange={(e) => setFleetText(e.target.value)} placeholder="Describe the endpoints you want — e.g. offline Windows servers with critical alerts" />
+              <button className="ops-button primary" type="submit" disabled={fleetBusy}>{fleetBusy ? "Finding…" : "Find"}</button>
+              {fleetQuery && <button className="ops-button" type="button" onClick={() => { setFleetQuery(null); setFleetText(""); }}>Clear</button>}
+            </form>
+            {fleetQuery && <div className="fleet-understood" role="status">
+              {fleetQuery.understood.length ? <><span>Showing {fleetQuery.count} endpoint{fleetQuery.count === 1 ? "" : "s"} where</span>{fleetQuery.understood.map((u) => <span key={u} className="fleet-chip">{u}</span>)}</> : <span>Nothing in that description could be turned into a filter, so no endpoints are shown.</span>}
+              {fleetQuery.ignored.length > 0 && <span className="fleet-ignored">Not understood: {fleetQuery.ignored.join(", ")}</span>}
+            </div>}
             <div className="device-toolbar flex flex-wrap gap-2">
               <input className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm" placeholder="Search hostname…" value={search} onChange={(e) => setSearch(e.target.value)} />
               <select className="bg-slate-900 border border-slate-800 rounded px-2 py-2 text-sm" value={deviceTypeFilter} onChange={(e) => setDeviceTypeFilter(e.target.value)}>
@@ -1205,9 +1234,29 @@ export default function App() {
                 </>}
               </Panel>
             )}
-            <Table head={["Hostname", "Type", "OS / IP", "Status", "Open alerts", "Pending patches", "CPU", "Disk", "Mem"]}>
+            {selectedIds.size > 0 && <div className="bulk-bar" role="region" aria-label="Bulk actions">
+              <strong>{selectedIds.size} selected</strong>
+              {canWrite && <span className="bulk-group">
+                <select aria-label="Script to run" value={bulk.script_id} onChange={(e) => setBulk({ ...bulk, script_id: e.target.value })}><option value="">Choose a script…</option>{scripts.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}</select>
+                <button className="ops-button primary" disabled={!bulk.script_id} onClick={async () => {
+                  if (!window.confirm(`Queue this script on ${selectedIds.size} endpoint${selectedIds.size === 1 ? "" : "s"}?`)) return;
+                  try { setBulkResult(await api("/v1/fleet/bulk", { method: "POST", body: JSON.stringify({ device_ids: [...selectedIds], action: "run_script", script_id: Number(bulk.script_id) }) })); } catch (e) { setErr(e.message); }
+                }}>Run script</button>
+              </span>}
+              <span className="bulk-group">
+                <input aria-label="Ticket title for selected endpoints" placeholder="Ticket title" value={bulk.title} onChange={(e) => setBulk({ ...bulk, title: e.target.value })} />
+                <select aria-label="Ticket priority" value={bulk.priority} onChange={(e) => setBulk({ ...bulk, priority: e.target.value })}>{["low", "normal", "high", "urgent"].map((pr) => <option key={pr} value={pr}>{pr}</option>)}</select>
+                <button className="ops-button" disabled={bulk.title.trim().length < 3} onClick={async () => {
+                  try { setBulkResult(await api("/v1/fleet/bulk", { method: "POST", body: JSON.stringify({ device_ids: [...selectedIds], action: "create_ticket", title: bulk.title.trim(), priority: bulk.priority }) })); setBulk({ ...bulk, title: "" }); load(); } catch (e) { setErr(e.message); }
+                }}>Create tickets</button>
+              </span>
+              <button className="ops-link" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
+            </div>}
+            {bulkResult && <div className="ops-note" role="status"><strong>{bulkResult.action === "run_script" ? "Script queued" : "Tickets created"}: {bulkResult.succeeded} of {bulkResult.requested} endpoints.</strong>{bulkResult.failed > 0 && ` ${bulkResult.failed} failed: ${bulkResult.results.filter((r) => !r.ok).map((r) => `#${r.device_id} ${r.error}`).join("; ")}.`} Recorded as signed proof {bulkResult.proof_id.slice(0, 10)}…. <button className="ops-link" onClick={() => setBulkResult(null)}>Dismiss</button></div>}
+            <Table head={[<input key="all" type="checkbox" aria-label="Select all shown endpoints" checked={filteredDevices.length > 0 && filteredDevices.every((d) => selectedIds.has(d.id))} onChange={(e) => setSelectedIds(e.target.checked ? new Set(filteredDevices.map((d) => d.id)) : new Set())} />, "Hostname", "Type", "OS / IP", "Status", "Open alerts", "Pending patches", "CPU", "Disk", "Mem"]}>
               {filteredDevices.map((d) => (
-                <tr key={d.id} className="cursor-pointer hover:bg-slate-800/50" onClick={() => openDevice(d.id)}>
+                <tr key={d.id} className={`cursor-pointer hover:bg-slate-800/50 ${selectedIds.has(d.id) ? "row-selected" : ""}`} onClick={() => openDevice(d.id)}>
+                  <td className="pl-4 py-3 w-8" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${d.hostname}`} checked={selectedIds.has(d.id)} onChange={(e) => { const next = new Set(selectedIds); if (e.target.checked) next.add(d.id); else next.delete(d.id); setSelectedIds(next); }} /></td>
                   <td className="px-4 py-3"><button className="device-hostname" onClick={(e) => { e.stopPropagation(); openDevice(d.id); }}><span className="device-avatar"><Icon name="devices" /></span><span>{d.hostname}<small>Endpoint #{d.id}</small></span></button></td>
                   <td className="px-4 py-3 text-xs text-slate-400">{(d.device_type || "workstation").replace("_", " ")}</td>
                   <td className="px-4 py-3 text-slate-400">{d.os} · {d.ip}</td>
