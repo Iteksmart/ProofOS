@@ -14,6 +14,7 @@ async function bootstrap(page, org = "E2E UI Org") {
 
 async function registerDevice(page, hostname) {
   await page.getByRole("button", { name: "Devices", exact: true }).click();
+  await page.locator("summary", { hasText: "Register an endpoint" }).click();
   await page.getByPlaceholder("hostname", { exact: true }).fill(hostname);
   await page.getByPlaceholder("os", { exact: true }).fill("Linux");
   await page.getByPlaceholder("ip", { exact: true }).fill("10.2.2.2");
@@ -48,11 +49,11 @@ test("dashboard renders cleanly with no errors", async ({ page }) => {
   await page.goto("/");
   await bootstrap(page);
   await expect(page.getByText("Quick actions")).toBeVisible();
-  await expect(page.getByText("Open alerts")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Open alerts", exact: true })).toBeVisible();
   await expect(page.getByText("Proof records")).toBeVisible();
   // Exec/Operations toggle exists and switches
-  await page.getByRole("button", { name: "Operations" }).click();
-  await page.getByRole("button", { name: "Exec" }).click();
+  await page.getByRole("button", { name: "Operations view", exact: true }).click();
+  await page.getByRole("button", { name: "Executive view", exact: true }).click();
   expect(errors).toEqual([]);
 });
 
@@ -60,6 +61,7 @@ test("devices: register, search, open, run command", async ({ page }) => {
   const errors = trackErrors(page);
   await bootstrap(page);
   await nav("Devices")(page);
+  await page.locator("summary", { hasText: "Register an endpoint" }).click();
   await page.getByPlaceholder("hostname", { exact: true }).fill("ui-ws-01");
   await page.getByPlaceholder("os", { exact: true }).fill("Linux");
   await page.getByPlaceholder("ip", { exact: true }).fill("10.1.1.1");
@@ -74,6 +76,7 @@ test("devices: register, search, open, run command", async ({ page }) => {
   // open detail + run command
   await page.getByText("ui-ws-01").first().click();
   await expect(page.getByText("Device · ui-ws-01")).toBeVisible({ timeout: 10000 });
+  await page.getByRole("tab", { name: "Operations", exact: true }).click();
   await page.getByPlaceholder("e.g. df -h / ipconfig / show version").fill("echo hi");
   await page.getByRole("button", { name: "Run" }).click();
   expect(errors).toEqual([]);
@@ -175,13 +178,13 @@ test("VMs + patches + onboarding + consulting + audit", async ({ page }) => {
   await registerDevice(page, "vm-host-01");
   await nav("VMs")(page);
   await page.getByPlaceholder("VM name").fill("dc-01");
-  await page.locator("select").first().selectOption({ index: 1 });
+  await page.locator("main select").first().selectOption({ index: 1 });
   await page.getByRole("button", { name: "Register VM" }).click();
   await expect(page.getByText("dc-01").first()).toBeVisible({ timeout: 10000 });
 
   await nav("Patches")(page);
   await page.getByPlaceholder("name e.g. openssl").fill("openssl");
-  await page.locator("select").first().selectOption({ index: 1 });
+  await page.locator("main select").first().selectOption({ index: 1 });
   await page.getByRole("button", { name: "Register patch" }).click();
   await expect(page.getByText("openssl").first()).toBeVisible({ timeout: 10000 });
 

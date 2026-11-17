@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -8,14 +9,15 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"]],
   use: {
-    baseURL: "http://127.0.0.1:5174",
+    baseURL: "http://127.0.0.1:5184",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    reducedMotion: "reduce",
   },
   webServer: [
     {
       command: "python -m uvicorn app.main:app --host 127.0.0.1 --port 8018",
-      cwd: "../services/api",
+      cwd: fileURLToPath(new URL("../../services/api", import.meta.url)),
       url: "http://127.0.0.1:8018/health",
       env: {
         ...process.env,
@@ -31,8 +33,8 @@ export default defineConfig({
       timeout: 90000,
     },
     {
-      command: "npm run dev -- --host 127.0.0.1 --port 5174",
-      url: "http://127.0.0.1:5174",
+      command: "npm run dev -- --host 127.0.0.1 --port 5184 --strictPort",
+      url: "http://127.0.0.1:5184",
       env: {
         ...process.env,
         VITE_API_URL: "",

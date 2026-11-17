@@ -38,6 +38,8 @@ def open_session(device_id: int, payload: RemoteSessionIn, db: Session = Depends
     if not dev:
         raise HTTPException(status_code=404, detail="device not found")
     _scope(user, dev.org_id)
+    if user.role not in {"admin", "manager"}:
+        raise HTTPException(status_code=403, detail="admin/manager only for remote sessions")
     token = _secrets.token_urlsafe(24)
     s = RemoteSession(org_id=dev.org_id, device_id=device_id, kind=payload.kind, provider=payload.provider, token=token)
     db.add(s)

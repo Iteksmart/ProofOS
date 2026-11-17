@@ -6,6 +6,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import json
 import logging
 import os
 import platform
@@ -18,8 +20,100 @@ import httpx
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("proofos-agent")
 
-AGENT_VERSION = "1.0.0"
+AGENT_VERSION = "1.1.0"
 MAX_OUTPUT = 20000
+
+
+def software_inventory() -> list[dict]:
+    """Use native package databases; never invoke Win32_Product (it repairs MSI)."""
+    packages = {}
+    if platform.system() == "Windows":
+        import winreg
+        path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+                try:
+                    with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | view) as root:
+                        for index in range(winreg.QueryInfoKey(root)[0]):
+                            try:
+                                with winreg.OpenKey(root, winreg.EnumKey(root, index)) as item:
+                                    def value(name):
+                                        try:
+                                            return str(winreg.QueryValueEx(item, name)[0])
+                                        except OSError:
+                                            return ""
+                                    name, version = value("DisplayName"), value("DisplayVersion")
+                                    if name:
+                                        packages[(name, version)] = {"name": name[:500], "version": version[:255], "publisher": value("Publisher")[:500]}
+                            except OSError:
+                                continue
+                except OSError:
+                    continue
+    else:
+        import shutil
+        if shutil.which("dpkg-query"):
+            cmd = ["dpkg-query", "-W", "-f=${Package}\t${Version}\n"]
+        elif shutil.which("rpm"):
+            cmd = ["rpm", "-qa", "--qf", "%{NAME}\t%{VERSION}-%{RELEASE}\n"]
+        elif platform.system() == "Darwin":
+            cmd = ["system_profiler", "SPApplicationsDataType", "-json"]
+        else:
+            raise RuntimeError("No supported native software inventory provider")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=True)
+        if platform.system() == "Darwin":
+            for app in json.loads(result.stdout).get("SPApplicationsDataType", []):
+                name, version = app.get("_name", ""), app.get("version", "")
+                if name:
+                    packages[(name, version)] = {"name": name[:500], "version": version[:255], "publisher": ""}
+        else:
+            for line in result.stdout.splitlines():
+                name, _, version = line.partition("\t")
+                if name:
+                    packages[(name, version)] = {"name": name[:500], "version": version[:255], "publisher": ""}
+    return sorted(packages.values(), key=lambda p: p["name"].lower())
+
+
+def detailed_inventory() -> dict:
+    import psutil
+    data = {"hostname": socket.gethostname(), "os": platform.platform(), "hardware": {
+        "processor": platform.processor(), "architecture": platform.machine(),
+        "physical_cores": psutil.cpu_count(logical=False), "logical_cores": psutil.cpu_count(),
+        "memory_bytes": psutil.virtual_memory().total,
+        "boot_time": dt.datetime.fromtimestamp(psutil.boot_time(), dt.timezone.utc).isoformat()},
+        "disks": [], "networks": [], "software": [], "errors": [], "software_status": "unavailable"}
+    if platform.system() == "Linux":
+        from pathlib import Path
+        for field, filename in (("manufacturer", "sys_vendor"), ("model", "product_name")):
+            try:
+                data["hardware"][field] = Path(f"/sys/class/dmi/id/{filename}").read_text().strip()[:255]
+            except OSError:
+                pass
+    elif platform.system() == "Windows":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\BIOS") as key:
+                for field, name in (("manufacturer", "SystemManufacturer"), ("model", "SystemProductName")):
+                    data["hardware"][field] = str(winreg.QueryValueEx(key, name)[0])[:255]
+        except OSError:
+            data["errors"].append("System manufacturer/model unavailable")
+    for disk in psutil.disk_partitions()[:256]:
+        try:
+            usage = psutil.disk_usage(disk.mountpoint)
+            data["disks"].append({"device": disk.device[:255], "mountpoint": disk.mountpoint[:1024],
+                "filesystem": disk.fstype[:100], "total_bytes": usage.total, "free_bytes": usage.free})
+        except OSError:
+            continue
+    for name, addresses in psutil.net_if_addrs().items():
+        for address in addresses:
+            data["networks"].append({"name": name[:255], "address": address.address[:255], "family": str(address.family)[:40]})
+    data["networks"] = data["networks"][:1024]
+    try:
+        software = software_inventory()
+        data["software"] = software[:5000]
+        data["software_status"] = "partial" if len(software) > 5000 else "complete"
+    except Exception as exc:
+        data["errors"].append(f"Software collection unavailable: {type(exc).__name__}")
+    return data
 
 
 def inventory() -> dict:
@@ -104,11 +198,21 @@ def loop(api: str, device_id: int, interval: int = 15, token: str = "") -> None:
     client = httpx.Client(base_url=api.rstrip("/"), timeout=15, headers=headers)
     log.info("agent start device=%s api=%s interval=%s", device_id, api, interval)
     delay = interval
+    next_inventory = 0.0
     while True:
         try:
             ok = heartbeat(client, device_id)
             if not ok:
                 log.warning("heartbeat non-200 (device may not exist)")
+            if ok and time.monotonic() >= next_inventory:
+                try:
+                    response = client.post(f"/v1/devices/{device_id}/inventory", json=detailed_inventory(), timeout=45)
+                    response.raise_for_status()
+                    next_inventory = time.monotonic() + 3600
+                    log.info("inventory uploaded device=%s", device_id)
+                except Exception as exc:
+                    next_inventory = time.monotonic() + 300
+                    log.warning("inventory upload failed: %s", exc)
             for job in poll_scripts(client, device_id):
                 body = job.get("body", "")
                 log.info("exec run=%s script=%s", job.get("id"), job.get("name"))

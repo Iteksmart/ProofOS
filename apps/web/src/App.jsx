@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { HealthPill, ProofBadge } from "@proofos/ui";
+import { DeviceActivity, InventoryDetail, InventoryPage, IntegrationsPage, ReportsPage, TelemetryChart } from "./Operations";
+import CommandMenu from "./CommandMenu";
+import InvestigationPanel from "./InvestigationPanel";
+import { AccessPage, RecoveryPanel, TelemetryPage, TopologyPage } from "./Evidence";
 
 // Production nginx proxies /v1 to the API, so an empty build value keeps all
 // browser traffic on the current origin. Local Vite dev keeps localhost:8000.
@@ -58,9 +62,9 @@ async function api(path, opts = {}) {
 function Stat({ label, value, sub }) {
   return (
     <div className="card hover p-4">
-      <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</p>
-      <p className="text-2xl font-bold mt-2 text-slate-100 tabular-nums">{value}</p>
-      {sub && <p className="text-[11px] text-slate-500 mt-1">{sub}</p>}
+      <p className="stat-label">{label}</p>
+      <p className="stat-value mt-2 tabular-nums">{value}</p>
+      {sub && <p className="text-xs text-slate-500 mt-1.5">{sub}</p>}
     </div>
   );
 }
@@ -101,6 +105,60 @@ function Field({ label, children }) {
 
 const inputCls = "w-full input px-3 py-2 text-sm text-slate-100";
 
+const ICONS = {
+  dash: "M4 4h7v7H4z M13 4h7v4h-7z M13 11h7v9h-7z M4 14h7v6H4z",
+  analytics: "M3 20h18 M7 20v-9 M12 20V5 M17 20v-6",
+  devices: "M3 5h18v11H3z M8 20h8 M12 16v4",
+  inventory: "M4 7l8-4 8 4v10l-8 4-8-4z M4 7l8 4 8-4 M12 11v10",
+  integrations: "M8 3v5 M16 3v5 M6 8h12v3a6 6 0 0 1-12 0z M12 17v4",
+  reports: "M5 3h10l4 4v14H5z M14 3v5h5 M9 17v-3 M12 17v-6 M15 17v-4",
+  monitor: "M3 12h4l3-8 4 16 3-8h4",
+  topology: "M9 4h6v5H9z M3 15h6v5H3z M15 15h6v5h-6z M12 9v3 M6 15v-3h12v3",
+  telemetry: "M4 6h16 M4 12h11 M4 18h7 M17 15l4 3-4 3",
+  access: "M8 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M12 11h9 M17 11v3 M20 11v2",
+  tickets: "M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4z M14 7v10",
+  scripts: "M4 5h16v14H4z M8 10l3 2-3 2 M13 14h3",
+  automations: "M13 3 5 14h6l-1 7 8-11h-6z",
+  vms: "M12 3 3 8l9 5 9-5z M3 12l9 5 9-5 M3 16l9 5 9-5",
+  patches: "M12 3v12 M7 10l5 5 5-5 M4 20h16",
+  proof: "M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6z M9 12l2 2 4-4",
+  audit: "M9 4h6v3H9z M7 5H5v16h14V5h-2 M9 14l2 2 4-4",
+  changes: "M4 8h13 M14 5l3 3-3 3 M20 16H7 M10 13l-3 3 3 3",
+  vault: "M6 11h12v9H6z M9 11V8a3 3 0 0 1 6 0v3",
+  enclaves: "M3 5h18v14H3z M3 9h18 M9 14h6",
+  knowledge: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z M5 17a3 3 0 0 1 3-3h11",
+  cmdb: "M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3",
+  time: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 7v5l3 2",
+  onboarding: "M5 21V4 M5 4h12l-2 4 2 4H5",
+  consulting: "M3 8h18v12H3z M9 8V5h6v3 M3 13h18",
+  ai: "M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z M18 15v5 M15.5 17.5h5",
+  admin: "M4 7h10 M18 7h2 M14 5v4 M4 17h4 M12 17h8 M8 15v4",
+  itechsmart: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
+  sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M12 2v2 M12 20v2 M2 12h2 M20 12h2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M4.9 19.1l1.4-1.4 M17.7 6.3l1.4-1.4",
+  moon: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z",
+  refresh: "M20 11a8 8 0 0 0-14.3-4.3L4 9 M4 4v5h5 M4 13a8 8 0 0 0 14.3 4.3L20 15 M20 20v-5h-5",
+  search: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M15 15l6 6",
+  logout: "M9 4H5v16h4 M16 8l4 4-4 4 M20 12H10",
+};
+
+function Icon({ name, size = 16 }) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d={ICONS[name]} />
+    </svg>
+  );
+}
+
+function BrandMark({ size = 32 }) {
+  return (
+    <div className="brand-mark shrink-0" style={{ width: size, height: size }}>
+      <svg aria-hidden="true" width={size * 0.56} height={size * 0.56} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6z M9 12l2 2 4-4" />
+      </svg>
+    </div>
+  );
+}
+
 function Bars({ data, color = "bg-violet-500" }) {
   const max = Math.max(1, ...data.map((d) => d.value));
   return (
@@ -108,10 +166,10 @@ function Bars({ data, color = "bg-violet-500" }) {
       {data.map((d) => (
         <div key={d.label} className="flex items-center gap-2 text-xs">
           <span className="w-24 text-slate-400 truncate">{d.label}</span>
-          <div className="flex-1 bg-slate-800 rounded h-3 overflow-hidden">
-            <div className={`h-3 rounded transition-all ${d.color || color}`} style={{ width: `${Math.round((d.value / max) * 100)}%` }} />
+          <div className="flex-1 bar-track">
+            <div className={`bar-fill ${d.color || color}`} style={{ width: `${Math.round((d.value / max) * 100)}%` }} />
           </div>
-          <span className="w-8 text-right text-slate-500">{d.value}</span>
+          <span className="w-8 text-right text-slate-300 tabular-nums">{d.value}</span>
         </div>
       ))}
     </div>
@@ -119,6 +177,12 @@ function Bars({ data, color = "bg-violet-500" }) {
 }
 
 export default function App() {
+  const [commandOpen, setCommandOpen] = useState(false);
+  useEffect(() => {
+    const shortcut = (event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, []);
   const [view, setView] = useState("dash");
   const [authToken, setAuthToken] = useState(token());
   const [orgId, setOrgId] = useState(Number(localStorage.getItem("proofos_org") || 1));
@@ -139,7 +203,7 @@ export default function App() {
   const [verifyResult, setVerifyResult] = useState("");
   const [aiQuery, setAiQuery] = useState("Summarise offline devices");
   const [aiResult, setAiResult] = useState("");
-  const [newTicket, setNewTicket] = useState({ title: "", body: "", priority: "normal" });
+  const [newTicket, setNewTicket] = useState({ title: "", body: "", priority: "normal", device_id: "" });
   const [newScript, setNewScript] = useState({ name: "", body: "echo ok", version: "1.0.0" });
   const [newDevice, setNewDevice] = useState({ hostname: "", os: "", ip: "", device_type: "workstation" });
   const [enrolled, setEnrolled] = useState(null);
@@ -149,6 +213,9 @@ export default function App() {
 
   const [selDevice, setSelDevice] = useState(null);
   const [deviceMetrics, setDeviceMetrics] = useState([]);
+  const [deviceInventory, setDeviceInventory] = useState(null);
+  const [devicePatches, setDevicePatches] = useState([]);
+  const [devicePanelTab, setDevicePanelTab] = useState("overview");
   const [selTicket, setSelTicket] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
@@ -158,6 +225,7 @@ export default function App() {
   const [approvals, setApprovals] = useState([]);
   const [users, setUsers] = useState([]);
   const [deviceTypeFilter, setDeviceTypeFilter] = useState("");
+  const [deviceStatusFilter, setDeviceStatusFilter] = useState("all");
   const [cmdBody, setCmdBody] = useState("");
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "engineer" });
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
@@ -180,7 +248,7 @@ export default function App() {
   const [profileForm, setProfileForm] = useState({ contact_name: "", contact_email: "", phone: "", industry: "", status: "active", notes: "" });
   const [projects, setProjects] = useState([]);
   const [newProject, setNewProject] = useState({ name: "", description: "", status: "planning" });
-  const [theme, setTheme] = useState(localStorage.getItem("proofos_theme") || "dark");
+  const [theme, setTheme] = useState(localStorage.getItem("proofos_theme") || (window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark"));
   const [cis, setCis] = useState([]);
   const [newCi, setNewCi] = useState({ name: "", ci_type: "server", status: "operational", description: "", attributes: "{}" });
   const [articles, setArticles] = useState([]);
@@ -496,12 +564,18 @@ export default function App() {
   async function openDevice(id) {
     setErr("");
     try {
-      const [dev, m] = await Promise.all([
+      const [dev, m, p, inventory] = await Promise.all([
         api(`/v1/devices/${id}`),
         api(`/v1/devices/${id}/metrics`).catch(() => []),
+        api(`/v1/patches?org_id=${orgId}&device_id=${id}`).catch(() => []),
+        api(`/v1/devices/${id}/inventory`),
       ]);
       setSelDevice(dev);
       setDeviceMetrics(Array.isArray(m) ? m : []);
+      setDeviceInventory(inventory);
+      setDevicePatches(Array.isArray(p) ? p : []);
+      setDevicePanelTab("overview");
+      setRemoteSession(null);
     } catch (e) {
       setErr(e.message);
     }
@@ -662,7 +736,7 @@ export default function App() {
     if (view === "analytics") loadAnomalies();
     if (view === "itechsmart") loadIts();
     if (view === "vms") loadVms();
-    if (view === "patches") loadPatches();
+    if (view === "patches" || view === "devices") loadPatches();
     if (view === "admin") loadPush();
     if (view === "enclaves") loadEnclaves();
   }, [view]);
@@ -689,11 +763,11 @@ export default function App() {
 
   if (!authToken) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="bg-slate-900 border border-slate-800 p-7 rounded-2xl w-full max-w-md shadow-2xl shadow-black/30">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl gradient-bar flex items-center justify-center text-white font-black">P</div>
-            <div><h1 className="text-2xl font-bold">Proof<span className="gradient-text">OS</span></h1><p className="text-xs text-slate-500 mt-1">Operations with an audit trail</p></div>
+      <div className="auth-shell min-h-screen text-slate-100 flex items-center justify-center p-6">
+        <div className="auth-card animate-fade-up p-7 sm:p-8 w-full max-w-md">
+          <div className="flex items-center gap-3 mb-7">
+            <BrandMark size={42} />
+            <div><h1 className="text-2xl font-semibold tracking-tight">Proof<span className="gradient-text">OS</span></h1><p className="text-xs text-slate-500 mt-0.5">Operations with an audit trail</p></div>
           </div>
           <form onSubmit={doLogin}>
             <div className="space-y-3">
@@ -743,11 +817,23 @@ export default function App() {
 
   const offline = devices.filter((d) => d.status !== "online");
   const openTickets = tickets.filter((t) => t.status === "open");
-  const filteredDevices = devices.filter((d) => d.hostname.toLowerCase().includes(search.toLowerCase()) && (!deviceTypeFilter || d.device_type === deviceTypeFilter));
+  const alertsByDevice = {};
+  alerts.filter((a) => !a.acked && a.device_id).forEach((a) => {
+    const bucket = (alertsByDevice[a.device_id] ||= { critical: 0, warning: 0 });
+    bucket[a.severity === "critical" ? "critical" : "warning"] += 1;
+  });
+  const patchesByDevice = {};
+  patches.filter((p) => p.status === "pending" || p.status === "failed").forEach((p) => {
+    const bucket = (patchesByDevice[p.device_id] ||= { pending: 0, critical: 0 });
+    bucket.pending += 1;
+    if (p.severity === "critical") bucket.critical += 1;
+  });
+  const matchesStatus = (d) => deviceStatusFilter === "all" || (deviceStatusFilter === "online" ? d.status === "online" : deviceStatusFilter === "attention" ? d.status !== "online" : deviceStatusFilter === "patches" ? Boolean(patchesByDevice[d.id]) : Boolean(alertsByDevice[d.id]));
+  const filteredDevices = devices.filter((d) => d.hostname.toLowerCase().includes(search.toLowerCase()) && (!deviceTypeFilter || d.device_type === deviceTypeFilter) && matchesStatus(d));
   const isBreached = (t) => t.due_at && new Date(t.due_at) < Date.now() && !["closed", "cancelled"].includes(t.status);
 
   const deviceHealth = [
-    { label: "Online", value: devices.filter((d) => d.status === "online").length, color: "bg-violet-500" },
+    { label: "Online", value: devices.filter((d) => d.status === "online").length, color: "bg-emerald-500" },
     { label: "Offline", value: devices.filter((d) => d.status === "offline").length, color: "bg-red-500" },
     { label: "Stale", value: devices.filter((d) => d.status === "stale").length, color: "bg-amber-500" },
     { label: "Other", value: devices.filter((d) => !["online", "offline", "stale"].includes(d.status)).length, color: "bg-slate-500" },
@@ -768,31 +854,55 @@ export default function App() {
     ["cmdb", "CMDB"], ["knowledge", "Knowledge"], ["vault", "Vault"], ["changes", "Changes"], ["time", "Time"],
     ["vms", "VMs"], ["patches", "Patches"], ["enclaves", "Workspaces"], ["itechsmart", "iTechSmart"],
     ["audit", "Audit"], ["onboarding", "Onboarding"], ["consulting", "Consulting"],
+    ["inventory", "Inventory"], ["integrations", "Integrations"], ["reports", "Reports"],
+    ["topology", "Topology"], ["telemetry", "Telemetry"], ["access", "Access"],
   ];
   const navGroups = [
-    { label: "Workspace", ids: ["dash", "analytics"] },
-    { label: "Operations", ids: ["devices", "monitor", "tickets", "scripts", "automations", "vms", "patches"] },
-    { label: "Governance", ids: ["proof", "audit", "changes", "vault"] },
+    { label: "Workspace", ids: ["dash", "reports", "analytics"] },
+    { label: "Operations", ids: ["devices", "inventory", "monitor", "topology", "telemetry", "tickets", "scripts", "automations", "vms", "patches"] },
+    { label: "Governance", ids: ["proof", "audit", "access", "changes", "vault", "enclaves"] },
     { label: "Service delivery", ids: ["knowledge", "cmdb", "time", "onboarding", "consulting"] },
-    { label: "Platform", ids: ["ai", "admin", "itechsmart"] },
+    { label: "Platform", ids: ["ai", "integrations", "admin", "itechsmart"] },
   ].map((group) => ({ ...group, items: group.ids.map((id) => nav.find(([key]) => key === id)).filter(Boolean) }));
   const emptyWorkspace = devices.length === 0 && tickets.length === 0;
+  const claims = tokenClaims(authToken);
+  const canWrite = ["admin", "manager"].includes(claims.role);
+  const activeLabel = nav.find(([id]) => id === view)?.[1] || "Workspace";
+  const activeGroup = navGroups.find((g) => g.ids.includes(view))?.label || "Workspace";
+  const pageDescriptions = {
+    devices: "A single place to inspect health, understand an endpoint, and act with confidence.",
+    tickets: "Keep service work moving with ownership, endpoint context, and visible response targets.",
+    monitor: "Investigate availability and acknowledge the signals that need your attention.",
+    scripts: "Build repeatable operations. Inspect execution results before you call the work complete.",
+    automations: "Connect detection to action with clear controls over autonomy and approval.",
+    proof: "Inspect the signed evidence behind your operations and verify the chain.",
+    knowledge: "Keep the answers your team needs close to the work.",
+    patches: "Understand the update backlog and follow each deployment through to its result.",
+    ai: "Explore your workspace and propose the next action with operational context.",
+    admin: "Manage access, review approvals, and control your workspace.",
+    analytics: "Explore health patterns, activity, and emerging issues across your environment.",
+  };
 
   return (
     <div className="min-h-screen app-bg text-slate-100">
-      <header className="sticky top-0 z-20 border-b border-slate-800/60 px-4 md:px-6 py-3 flex flex-wrap items-center gap-3 backdrop-blur-xl bg-slate-950/90">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl gradient-bar flex items-center justify-center font-black text-white shadow-lg shadow-violet-500/25">P</div>
-          <h1 className="text-lg font-extrabold tracking-tight">Proof<span className="gradient-text">OS</span></h1>
+      <a className="skip-link" href="#workspace-main">Skip to content</a>
+      {commandOpen && <CommandMenu pages={nav} api={api} onClose={() => setCommandOpen(false)} onSelect={(result) => { setCommandOpen(false); if (result.kind === "page") setView(result.id); else if (result.kind === "device") { setView("devices"); openDevice(result.id); } else if (result.kind === "ticket") { setView("tickets"); openTicket(result.id); } else { setView("knowledge"); } }} />}
+      <header className="workspace-header glass sticky top-0 z-20 h-[65px] px-4 md:px-6 flex items-center gap-4">
+        <div className="workspace-brand flex items-center gap-2.5 lg:w-[216px] shrink-0">
+          <BrandMark />
+          <h1 className="text-[17px] font-semibold tracking-tight text-slate-100">Proof<span className="gradient-text">OS</span></h1>
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold truncate">{orgName}</p>
-          <p className="text-[11px] text-slate-500">Operations workspace · org {orgId}</p>
+        <div className="workspace-context min-w-0 flex-1 flex items-center gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold truncate text-slate-100">{orgName}</p>
+            <p className="text-[11px] text-slate-500 truncate">{activeGroup} <span className="px-1">/</span> {activeLabel}</p>
+          </div>
         </div>
+        <button className="workspace-search" onClick={() => setCommandOpen(true)} aria-label="Search workspace"><Icon name="search" /><span>Search your workspace</span><kbd>Ctrl K</kbd></button>
         <div className="ml-auto flex items-center gap-1">
-          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="nav-pill px-3 py-2 text-xs text-slate-400" title="Toggle theme">{theme === "dark" ? "☀ Light" : "🌙 Dark"}</button>
-          <button onClick={load} className="nav-pill px-3 py-2 text-xs text-slate-400">Refresh</button>
-          <button onClick={() => { localStorage.removeItem("proofos_token"); setAuthToken(""); setSetupCredentials(null); }} className="nav-pill px-3 py-2 text-xs text-red-400">Logout</button>
+          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="icon-btn" title="Toggle theme" aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}><Icon name={theme === "dark" ? "sun" : "moon"} /></button>
+          <button onClick={load} className="icon-btn" title="Reload workspace data" aria-label="Refresh"><Icon name="refresh" /><span className="hidden md:inline">Refresh</span></button>
+          <button onClick={() => { localStorage.removeItem("proofos_token"); setAuthToken(""); setSetupCredentials(null); }} className="icon-btn danger" aria-label="Logout"><Icon name="logout" /><span className="hidden sm:inline">Logout</span></button>
         </div>
       </header>
 
@@ -811,20 +921,29 @@ export default function App() {
       {loading && <div role="status" className="mx-4 md:mx-6 mt-3 text-xs text-slate-500">Loading workspace…</div>}
 
       <div className="lg:flex lg:items-start">
-        <aside aria-label="Main navigation" className="hidden lg:flex lg:sticky lg:top-[65px] lg:h-[calc(100vh-65px)] lg:w-60 lg:shrink-0 lg:flex-col lg:overflow-y-auto border-r border-slate-800/60 bg-slate-950/30 px-3 py-5">
+        <aside aria-label="Main navigation" className="sidebar hidden lg:flex lg:sticky lg:top-[65px] lg:h-[calc(100vh-65px)] lg:w-60 lg:shrink-0 lg:flex-col lg:overflow-y-auto px-3 py-5">
+          <div className="sidebar-workspace"><span>{orgName.slice(0, 1).toUpperCase()}</span><div><strong>{orgName}</strong><small>Operations workspace</small></div></div>
           {navGroups.map((group) => <section key={group.label} className="mb-5">
-            <h2 className="px-3 mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{group.label}</h2>
-            <div className="grid gap-1">{group.items.map(([id, label]) => <button key={id} aria-current={view === id ? "page" : undefined} onClick={() => setView(id)} className={`nav-pill w-full px-3 py-2 text-left text-sm font-medium ${view === id ? "active" : "text-slate-400"}`}>{label}</button>)}</div>
+            <h2 className="nav-label px-3">{group.label}</h2>
+            <div className="grid gap-0.5">{group.items.map(([id, label]) => <button key={id} aria-current={view === id ? "page" : undefined} onClick={() => setView(id)} className={`nav-pill w-full px-3 py-2 text-left text-[13.5px] ${view === id ? "active" : ""}`}><Icon name={id} />{label}</button>)}</div>
           </section>)}
-          <p className="mt-auto px-3 pt-4 text-[10px] leading-relaxed text-slate-600">ProofOS · audited operations</p>
+          <div className="sidebar-footer"><Icon name="proof" /><span>Accountable by design<small>ProofOS · Detect. Act. Prove.</small></span></div>
         </aside>
         <div className="min-w-0 flex-1">
-          <nav aria-label="Mobile navigation" className="lg:hidden border-b border-slate-800/60 px-4 py-2 overflow-x-auto">
-            <div className="flex w-max gap-1">{nav.map(([id, label]) => <button key={id} aria-current={view === id ? "page" : undefined} onClick={() => setView(id)} className={`nav-pill whitespace-nowrap px-3 py-2 text-xs font-medium ${view === id ? "active" : "text-slate-400"}`}>{label}</button>)}</div>
+          <nav aria-label="Mobile navigation" className="glass lg:hidden sticky top-[65px] z-10 px-4 py-2 mobile-page-nav">
+            <select aria-label="Navigate workspace" value={view} onChange={(e) => setView(e.target.value)}>{navGroups.map((g) => <optgroup key={g.label} label={g.label}>{g.items.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</optgroup>)}</select><button className="ops-button" onClick={() => setCommandOpen(true)}><Icon name="search" />Search</button>
           </nav>
-          <main className="p-4 md:p-6 grid gap-6">
+          <main id="workspace-main" className={`workspace-main p-4 md:p-6 grid gap-6 view-${view}`}>
+        {!["dash", "inventory", "integrations", "reports", "topology", "telemetry", "access"].includes(view) && <div className="workspace-page-title"><div><p className="ops-eyebrow">{activeGroup}</p><h1>{activeLabel === "Devices" ? "Your endpoint workspace" : activeLabel}</h1><p>{pageDescriptions[view] || `Manage ${activeLabel.toLowerCase()} across your operations workspace.`}</p></div>{view === "devices" && <button className="ops-button" onClick={() => setView("inventory")}>Explore inventory <span aria-hidden="true">↗</span></button>}</div>}
+        {view === "inventory" && <InventoryPage api={api} orgId={orgId} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
+        {view === "integrations" && <IntegrationsPage api={api} orgId={orgId} apiBase={API} />}
+        {view === "reports" && <ReportsPage api={api} orgId={orgId} apiBase={API} onNavigate={setView} />}
+        {view === "topology" && <TopologyPage api={api} devices={devices} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
+        {view === "telemetry" && <TelemetryPage api={api} onNavigate={setView} />}
+        {view === "access" && <AccessPage api={api} orgId={orgId} devices={devices} users={users} claims={claims} />}
         {view === "dash" && (
           <>
+            <section className="dashboard-intro"><div><p className="ops-eyebrow">Your operations, connected</p><h1>Clarity. Control.<br /><span>Proof of every action.</span></h1><p>A focused view of your environment and the work that moves it forward.</p><div className="dashboard-intro-actions"><button className="ops-button primary" onClick={() => setView("devices")}><Icon name="devices" />Manage endpoints</button><button className="ops-button" onClick={() => setView("reports")}>Explore reports <span aria-hidden="true">↗</span></button></div></div><div className="dashboard-focus"><div className="dashboard-focus-label"><span className="live-dot" />Workspace pulse<Icon name="monitor" /></div><div><strong>{alerts.filter((a) => !a.acked).length + approvals.filter((a) => a.status === "pending").length}</strong><span>items need your attention</span></div><div className="dashboard-focus-stats"><button onClick={() => setView("monitor")}><span>Open alerts</span><strong>{alerts.filter((a) => !a.acked).length} <small>↗</small></strong></button><button onClick={() => setView("admin")}><span>Awaiting approval</span><strong>{approvals.filter((a) => a.status === "pending").length} <small>↗</small></strong></button></div></div></section>
             <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <Stat label="Devices" value={devices.length} sub={`${offline.length} offline`} />
               <Stat label="Open tickets" value={openTickets.length} sub={`${tickets.length} total`} />
@@ -834,10 +953,10 @@ export default function App() {
               <Stat label="Audit score" value={audits[0] ? audits[0].score : "—"} sub={audits[0] ? `#${audits[0].id} ${audits[0].kind}` : "run an audit"} />
             </section>
 
-            <div className="flex gap-2">
-              <button onClick={() => setDashMode("operations")} className={`px-3 py-1.5 rounded-lg text-xs ${dashMode === "operations" ? "bg-slate-700" : "bg-slate-900 hover:bg-slate-800"}`}>⚙ Operations view</button>
-              <button onClick={() => setDashMode("executive")} className={`px-3 py-1.5 rounded-lg text-xs ${dashMode === "executive" ? "bg-slate-700" : "bg-slate-900 hover:bg-slate-800"}`}>📊 Executive view</button>
-            </div>
+            <div><div className="segmented" role="group" aria-label="Dashboard view">
+              <button onClick={() => setDashMode("operations")} aria-pressed={dashMode === "operations"}>Operations view</button>
+              <button onClick={() => setDashMode("executive")} aria-pressed={dashMode === "executive"}>Executive view</button>
+            </div></div>
             {emptyWorkspace && <section className="card p-5 md:p-6 flex flex-wrap items-center justify-between gap-5 border-violet-500/20">
               <div className="max-w-2xl">
                 <p className="text-[10px] uppercase tracking-[0.16em] font-bold text-violet-300">Your workspace is ready</p>
@@ -889,7 +1008,7 @@ export default function App() {
                   <ul className="text-xs divide-y divide-slate-800">
                     {recentActivity.map((p) => (
                       <li key={p.id} className="py-1 flex justify-between gap-2">
-                        <span className="truncate">{p.what}</span>
+                        <span className="truncate">{({ "device.inventory.updated": "Endpoint inventory collected", "device.created": "Endpoint registered", "ticket.created": "Service ticket opened", "user.created": "Team member added", "org.created": "Workspace created", "command.queued": "Remote command queued", "script.completed": "Execution result received", "integration.webhook.received": "Integration delivery accepted" })[p.what] || p.what.replaceAll(".", " ").replace(/^./, (c) => c.toUpperCase())}</span>
                         <button onClick={() => verify(p.id)} className="text-violet-400 hover:underline whitespace-nowrap">verify</button>
                       </li>
                     ))}
@@ -907,7 +1026,7 @@ export default function App() {
                 {offline.length > 0 && (
                   <div className="mt-3">
                     <h3 className="text-xs text-slate-400 mb-1">Offline devices</h3>
-                    <ul className="text-sm">{offline.map((d) => <li key={d.id} className="py-1">⚠ {d.hostname} · {d.status}</li>)}</ul>
+                    <ul className="text-sm">{offline.map((d) => <li key={d.id} className="py-1 flex items-center gap-2"><span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-red-500" />{d.hostname} · {d.status}</li>)}</ul>
                   </div>
                 )}
                 {verifyResult && <p className="text-xs text-violet-300 mt-2 break-all">{verifyResult}</p>}
@@ -974,12 +1093,17 @@ export default function App() {
 
         {view === "devices" && (
           <>
-            <div className="flex flex-wrap gap-2">
+            <div className="device-toolbar flex flex-wrap gap-2">
               <input className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm" placeholder="Search hostname…" value={search} onChange={(e) => setSearch(e.target.value)} />
               <select className="bg-slate-900 border border-slate-800 rounded px-2 py-2 text-sm" value={deviceTypeFilter} onChange={(e) => setDeviceTypeFilter(e.target.value)}>
                 <option value="">all types</option>
                 {["workstation", "server", "access_point", "gateway", "switch", "node"].map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
               </select>
+              <button className="ops-button" onClick={async () => { try { const j = await api(`/v1/devices/refresh-status?org_id=${orgId}`, { method: "POST", body: "{}" }); setErr(`Status sync: ${j.changed} changed, ${j.alerts} alert(s).`); load(); } catch (e) { setErr(e.message); } }}>Sync statuses</button>
+              <div className="segmented" role="group" aria-label="Endpoint status filter">{[["all", "All"], ["online", "Online"], ["attention", "Offline or stale"], ["alerts", "With open alerts"], ["patches", "Patches pending"]].map(([key, label]) => <button key={key} aria-pressed={deviceStatusFilter === key} onClick={() => setDeviceStatusFilter(key)}>{label}</button>)}</div>
+              <span className="device-result-count">{filteredDevices.length} of {devices.length} endpoints</span>
+            </div>
+            <details className="card device-enrollment"><summary><span className="device-enrollment-icon">+</span><span>Register an endpoint<small>Create a device identity and retrieve its agent enrollment secret.</small></span><span className="device-enrollment-arrow">↗</span></summary><div className="device-enrollment-fields">
               <input className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm" placeholder="hostname" value={newDevice.hostname} onChange={(e) => setNewDevice({ ...newDevice, hostname: e.target.value })} />
               <input className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm" placeholder="os" value={newDevice.os} onChange={(e) => setNewDevice({ ...newDevice, os: e.target.value })} />
               <input className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm" placeholder="ip" value={newDevice.ip} onChange={(e) => setNewDevice({ ...newDevice, ip: e.target.value })} />
@@ -992,8 +1116,7 @@ export default function App() {
                 setEnrolled(j);
                 load();
               }}>Register</button>
-              <button className="bg-sky-600 px-3 py-2 rounded text-sm" onClick={async () => { const j = await api(`/v1/devices/refresh-status?org_id=${orgId}`, { method: "POST", body: "{}" }); setErr(`Status sync: ${j.changed} changed, ${j.alerts} alert(s).`); load(); }}>Refresh statuses</button>
-            </div>
+            </div></details>
             {enrolled && (
               <Panel title={`Device enrolled · ${enrolled.hostname}`} onClose={() => setEnrolled(null)}>
                 <p className="text-sm text-slate-300 mb-2">Install the agent with this one-time secret (copy it now):</p>
@@ -1003,6 +1126,30 @@ export default function App() {
             )}
             {selDevice && (
               <Panel title={`Device · ${selDevice.hostname}`} onClose={() => setSelDevice(null)}>
+                <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-3 py-2 mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-violet-200">Device command center</div>
+                    <div className="text-xs text-slate-400">Live agent telemetry, patch posture, and controlled remote operations.</div>
+                  </div>
+                  <HealthPill status={selDevice.status} />
+                </div>
+                <div className="device-status-strip">
+                  <div><span>Open alerts</span><strong>{alertsByDevice[selDevice.id] ? <span className="alert-counts"><span className="critical">{alertsByDevice[selDevice.id].critical} critical</span><span className="warning">{alertsByDevice[selDevice.id].warning} warning</span></span> : "None"}</strong></div>
+                  <div><span>Last seen</span><strong>{selDevice.last_seen ? new Date(selDevice.last_seen).toLocaleString() : "Never"}</strong></div>
+                  <div><span>Pending patches</span><strong>{patchesByDevice[selDevice.id] ? `${patchesByDevice[selDevice.id].pending}${patchesByDevice[selDevice.id].critical ? ` (${patchesByDevice[selDevice.id].critical} critical)` : ""}` : "None reported"}</strong></div>
+                  <div><span>Agent</span><strong>{selDevice.agent_version || "Not installed"}</strong></div>
+                  {alertsByDevice[selDevice.id] && <button className="ops-button" onClick={() => setView("monitor")}>Review alerts</button>}
+                </div>
+                <div className="flex flex-wrap gap-1 border-b border-slate-800 mb-3" role="tablist" aria-label="Device sections">
+                  {[
+                    ["overview", "Overview"],
+                    ["monitoring", "Monitoring"],
+                    ["inventory", "Inventory"],
+                    ["patches", `Patches (${devicePatches.filter((p) => p.status !== "installed").length})`],
+                    ["operations", "Operations"],
+                    ["activity", "Activity"],
+                  ].map(([id, label]) => <button key={id} role="tab" aria-selected={devicePanelTab === id} className={`px-3 py-2 text-xs border-b-2 ${devicePanelTab === id ? "border-violet-400 text-violet-200" : "border-transparent text-slate-500 hover:text-slate-300"}`} onClick={() => setDevicePanelTab(id)}>{label}</button>)}
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm mb-3">
                   <div><span className="text-slate-500">Type</span><div>{selDevice.device_type || "—"}</div></div>
                   <div><span className="text-slate-500">OS</span><div>{selDevice.os || "—"}</div></div>
@@ -1010,15 +1157,26 @@ export default function App() {
                   <div><span className="text-slate-500">Status</span><div><HealthPill status={selDevice.status} /></div></div>
                   <div><span className="text-slate-500">Last seen</span><div className="text-xs">{selDevice.last_seen || "—"}</div></div>
                 </div>
-                <div className="mb-3">
+                {(devicePanelTab === "overview" || devicePanelTab === "monitoring") && <TelemetryChart metrics={deviceMetrics} />}
+                {devicePanelTab === "monitoring" && <div className="mb-3">
                   <h3 className="text-xs text-slate-400 mb-1">Telemetry history (CPU/Disk/Mem %)</h3>
                   {deviceMetrics.length === 0 ? <p className="text-sm text-slate-500">No heartbeats yet.</p> : (
                     <ul className="text-xs divide-y divide-slate-800 max-h-48 overflow-auto">
                       {deviceMetrics.slice(0, 20).map((m) => <li key={m.id} className="py-1 flex justify-between"><span>{m.created_at}</span><span>CPU {Number(m.cpu).toFixed(0)} · Disk {Number(m.disk).toFixed(0)} · Mem {Number(m.mem).toFixed(0)}</span></li>)}
                     </ul>
                   )}
-                </div>
-                <div className="mb-3">
+                </div>}
+                {devicePanelTab === "inventory" && <InventoryDetail snapshot={deviceInventory} />}
+                {devicePanelTab === "activity" && <DeviceActivity api={api} deviceId={selDevice.id} renderRecovery={(runId) => <RecoveryPanel api={api} runId={runId} canWrite={canWrite} />} />}
+                {devicePanelTab === "overview" && <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
+                  {[['CPU', selDevice.cpu], ['Disk', selDevice.disk], ['Memory', selDevice.mem]].map(([label, value]) => <div key={label} className="rounded border border-slate-800 bg-slate-950 p-2"><div className="text-slate-500">{label}</div><div className={Number(value || 0) >= 90 ? "text-red-300 font-semibold" : "font-semibold"}>{deviceMetrics.length ? `${Number(value || 0).toFixed(0)}%` : "Not reported"}</div></div>)}
+                </div>}
+                {devicePanelTab === "overview" && <button className="mb-3 text-xs text-violet-300 hover:underline" onClick={() => { setNewTicket({ title: `${selDevice.hostname}: `, body: "", priority: "normal", device_id: String(selDevice.id) }); setSelDevice(null); setView("tickets"); }}>Create linked incident ticket</button>}
+                {devicePanelTab === "patches" && <div className="mb-3">
+                  <div className="flex items-center justify-between gap-2 mb-2"><h3 className="text-xs text-slate-400">Patch posture</h3><button className="text-xs text-sky-400 hover:underline" onClick={async () => { const j = await api(`/v1/patches/scan?org_id=${orgId}&device_id=${selDevice.id}`, { method: "POST", body: "{}" }); setErr(`Patch scan queued as run #${j.run_id}. Results appear in Scripts → run history.`); }}>Scan for patches</button></div>
+                  {devicePatches.length === 0 ? <p className="text-sm text-slate-500">No patch inventory has been reported for this device. Run a scan to collect it.</p> : <div className="divide-y divide-slate-800 rounded border border-slate-800 overflow-hidden">{devicePatches.map((p) => <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs bg-slate-950"><div><div className="font-medium">{p.name}</div><div className="text-slate-500">{p.category} · {p.current_version || "unknown"} → {p.available_version || "latest"}</div></div><div className="flex items-center gap-2"><HealthPill status={p.severity} /><span className="text-slate-400">{p.status}</span>{["pending", "failed"].includes(p.status) && <button className="text-violet-300 hover:underline" onClick={async () => { const deployment = await api(`/v1/patches/${p.id}/deploy`, { method: "POST", body: "{}" }); const refreshed = await api(`/v1/patches?org_id=${orgId}&device_id=${selDevice.id}`); setDevicePatches(Array.isArray(refreshed) ? refreshed : []); setErr(`Patch deployment queued as run #${deployment.run_id}; it will be marked installed only after the agent reports success.`); }}>Deploy</button>}{p.status === "deploying" && <span className="text-amber-300">Awaiting agent</span>}</div></div>)}</div>}
+                </div>}
+                {devicePanelTab === "operations" && <><div className="mb-3">
                   <h3 className="text-xs text-slate-400 mb-1">Remote command (via agent)</h3>
                   <div className="flex gap-2">
                     <input className={inputCls} placeholder="e.g. df -h / ipconfig / show version" value={cmdBody} onChange={(e) => setCmdBody(e.target.value)} />
@@ -1044,34 +1202,42 @@ export default function App() {
                     {remoteSession.note && <div className="text-slate-500 mt-1">{remoteSession.note}</div>}
                   </div>
                 )}
+                </>}
               </Panel>
             )}
-            <Table head={["Hostname", "Type", "OS / IP", "Status", "CPU", "Disk", "Mem"]}>
+            <Table head={["Hostname", "Type", "OS / IP", "Status", "Open alerts", "Pending patches", "CPU", "Disk", "Mem"]}>
               {filteredDevices.map((d) => (
                 <tr key={d.id} className="cursor-pointer hover:bg-slate-800/50" onClick={() => openDevice(d.id)}>
-                  <td className="px-4 py-3">{d.hostname}</td>
+                  <td className="px-4 py-3"><button className="device-hostname" onClick={(e) => { e.stopPropagation(); openDevice(d.id); }}><span className="device-avatar"><Icon name="devices" /></span><span>{d.hostname}<small>Endpoint #{d.id}</small></span></button></td>
                   <td className="px-4 py-3 text-xs text-slate-400">{(d.device_type || "workstation").replace("_", " ")}</td>
                   <td className="px-4 py-3 text-slate-400">{d.os} · {d.ip}</td>
                   <td className="px-4 py-3"><HealthPill status={d.status} /></td>
+                  <td className="px-4 py-3">{alertsByDevice[d.id] ? <span className="alert-counts">{alertsByDevice[d.id].critical > 0 && <span className="critical" title="Unacknowledged critical alerts">{alertsByDevice[d.id].critical}</span>}{alertsByDevice[d.id].warning > 0 && <span className="warning" title="Unacknowledged warnings">{alertsByDevice[d.id].warning}</span>}</span> : <span className="text-slate-600">—</span>}</td>
+                  <td className="px-4 py-3">{patchesByDevice[d.id] ? <span className="alert-counts">{patchesByDevice[d.id].critical > 0 && <span className="critical" title="Critical patches pending">{patchesByDevice[d.id].critical} critical</span>}<span className="warning" title="All pending or failed patches">{patchesByDevice[d.id].pending}</span></span> : <span className="text-slate-600">—</span>}</td>
                   <td className="px-4 py-3">{Number(d.cpu || 0).toFixed(0)}%</td>
                   <td className="px-4 py-3">{Number(d.disk || 0).toFixed(0)}%</td>
                   <td className="px-4 py-3">{Number(d.mem || 0).toFixed(0)}%</td>
                 </tr>
               ))}
             </Table>
+            {filteredDevices.length === 0 && <div className="ops-empty"><span className="ops-empty-symbol" aria-hidden="true">▣</span><h3>{devices.length ? "No endpoints match your filters" : "Bring your first endpoint into focus"}</h3><p>{devices.length ? "Try another hostname, device type, or status filter." : "Register an endpoint above, then run the agent to see live health, installed software, and operational history."}</p></div>}
           </>
         )}
 
         {view === "tickets" && (
           <>
-            <div className="grid md:grid-cols-3 gap-2">
+            <div className="grid md:grid-cols-4 gap-2">
               <input className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm" placeholder="Title e.g. printer offline" value={newTicket.title} onChange={(e) => setNewTicket({ ...newTicket, title: e.target.value })} />
               <input className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm" placeholder="Details" value={newTicket.body} onChange={(e) => setNewTicket({ ...newTicket, body: e.target.value })} />
+              <select className="bg-slate-900 border border-slate-800 rounded px-2 py-2 text-sm" aria-label="Linked device" value={newTicket.device_id} onChange={(e) => setNewTicket({ ...newTicket, device_id: e.target.value })}>
+                <option value="">No linked device</option>
+                {devices.map((d) => <option key={d.id} value={d.id}>{d.hostname} · {d.status}</option>)}
+              </select>
               <div className="flex gap-2">
                 <select className="bg-slate-900 border border-slate-800 rounded px-2 py-2 text-sm" value={newTicket.priority} onChange={(e) => setNewTicket({ ...newTicket, priority: e.target.value })}>
                   <option value="low">low</option><option value="normal">normal</option><option value="high">high</option><option value="urgent">urgent</option>
                 </select>
-                <button className="bg-violet-600 px-3 py-2 rounded text-sm" onClick={async () => { await api(`/v1/tickets`, { method: "POST", body: JSON.stringify({ org_id: orgId, ...newTicket }) }); setNewTicket({ title: "", body: "", priority: "normal" }); load(); }}>Create ticket</button>
+                <button className="bg-violet-600 px-3 py-2 rounded text-sm" onClick={async () => { await api(`/v1/tickets`, { method: "POST", body: JSON.stringify({ org_id: orgId, ...newTicket, device_id: newTicket.device_id ? Number(newTicket.device_id) : null }) }); setNewTicket({ title: "", body: "", priority: "normal", device_id: "" }); load(); }}>Create ticket</button>
               </div>
             </div>
             {selTicket && (
@@ -1090,6 +1256,12 @@ export default function App() {
                   </Field>
                   <Field label="Assignee">
                     <input className={inputCls} value={selTicket.assignee} onBlur={(e) => updateTicket({ assignee: e.target.value })} onChange={() => {}} />
+                  </Field>
+                  <Field label="Linked device">
+                    <select className={inputCls} value={selTicket.device_id || ""} onChange={(e) => updateTicket({ device_id: e.target.value ? Number(e.target.value) : null })}>
+                      <option value="">No linked device</option>
+                      {devices.map((d) => <option key={d.id} value={d.id}>{d.hostname}</option>)}
+                    </select>
                   </Field>
                   <div><span className="text-slate-500">SLA due</span><div className="text-sm">{isBreached(selTicket) ? <span className="text-red-400">breached · {selTicket.due_at}</span> : (selTicket.due_at || "—")}</div></div>
                 </div>
@@ -1318,7 +1490,7 @@ export default function App() {
         )}
 
         {view === "ai" && (
-          <div className="card p-4">
+          <><InvestigationPanel devices={devices} api={api} onApprovals={() => setView("admin")} /><div className="card p-4">
             <p className="text-sm text-slate-400">Copilot — device risk + ticket triage over live state (heuristic or OpenRouter/OmniRoute). Every query is proof-logged.</p>
             <div className="flex gap-2 mt-3">
               <input className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm" value={aiQuery} onChange={(e) => setAiQuery(e.target.value)} placeholder="e.g. offline devices" />
@@ -1349,7 +1521,7 @@ export default function App() {
                 }}>Propose</button>
               </div>
             </div>
-          </div>
+          </div></>
         )}
 
         {view === "admin" && (
@@ -1374,7 +1546,7 @@ export default function App() {
                       setErr(ks.engaged ? "Kill switch ENGAGED — all automations frozen" : "Kill switch disengaged");
                     } catch (e) { setErr(e.message); }
                   }}
-                  className={`w-full px-4 py-2 rounded-lg text-sm font-semibold ${killSwitch?.engaged ? "bg-red-600 hover:bg-red-500" : "bg-violet-600 hover:bg-violet-500"}`}
+                  className={`w-full px-4 py-2 rounded-lg text-sm font-semibold ${killSwitch?.engaged ? "btn-danger solid" : "btn-danger"}`}
                 >
                   {killSwitch?.engaged ? "Disengage kill switch" : "Engage kill switch"}
                 </button>
@@ -1791,7 +1963,7 @@ export default function App() {
                   <td className="px-4 py-3"><HealthPill status={p.severity} /></td>
                   <td className="px-4 py-3">{p.status}</td>
                   <td className="px-4 py-3">{p.device_id}</td>
-                  <td className="px-4 py-3"><button className="text-violet-400 text-xs hover:underline" onClick={async () => { await api(`/v1/patches/${p.id}/deploy`, { method: "POST", body: "{}" }); loadPatches(); }}>Deploy</button></td>
+                  <td className="px-4 py-3">{["pending", "failed"].includes(p.status) ? <button className="text-violet-400 text-xs hover:underline" onClick={async () => { const deployment = await api(`/v1/patches/${p.id}/deploy`, { method: "POST", body: "{}" }); setErr(`Patch deployment queued as run #${deployment.run_id}; status updates when the agent reports completion.`); loadPatches(); }}>Deploy</button> : <span className="text-xs text-slate-500">{p.status === "deploying" ? "Awaiting agent" : "Complete"}</span>}</td>
                 </tr>
               ))}
             </Table>

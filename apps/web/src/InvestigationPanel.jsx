@@ -1,0 +1,16 @@
+import React, { useState } from "react";
+
+export default function InvestigationPanel({ devices, api, onApprovals }) {
+  const [device, setDevice] = useState("");
+  const [question, setQuestion] = useState("");
+  const [action, setAction] = useState("diagnose_disk");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function run(kind) {
+    setBusy(true); setError(""); setResult(null);
+    try { setResult(await api(`/v1/ai/${kind}/${device}`, { method: "POST", body: JSON.stringify(kind === "investigate" ? { question: question || "Investigate the observed endpoint symptoms." } : { action }) })); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+  return <section className="card ops-report-card"><p className="ops-eyebrow">Evidence-backed operations</p><h2>Investigate. Approve. Execute. Verify.</h2><p>Investigate a specific endpoint using its telemetry and correlated events. Diagnostic and service-restart plans use bounded actions and require approval.</p><div className="ops-toolbar mt-4"><select className="input px-3 py-2 text-sm" aria-label="Investigation endpoint" value={device} onChange={(e) => { setDevice(e.target.value); setResult(null); }}><option value="">Select endpoint</option>{devices.map((d) => <option key={d.id} value={d.id}>{d.hostname} · {d.os}</option>)}</select><input className="input px-3 py-2 text-sm flex-1" aria-label="Investigation question" placeholder="What is happening on this endpoint?" value={question} onChange={(e) => setQuestion(e.target.value)} /><button className="ops-button primary" disabled={!device || busy} onClick={() => run("investigate")}>{busy ? "Working…" : "Investigate endpoint"}</button></div><div className="ops-toolbar mt-3"><select aria-label="Remediation action" className="input px-3 py-2 text-sm" value={action} onChange={(e) => setAction(e.target.value)}><option value="diagnose_disk">Inspect disk usage</option><option value="diagnose_processes">Inspect processes</option><option value="restart_nginx">Restart nginx (Linux)</option><option value="restart_print_spooler">Restart print spooler (Windows)</option></select><button className="ops-button" disabled={!device || busy} onClick={() => run("remediate")}>Prepare approval</button></div>{error && <p role="alert" className="p-3 mt-3">{error}</p>}{result && <div className="ops-note mt-4"><p className="whitespace-pre-wrap">{result.analysis || `Approval #${result.approval_id} prepared. Review the exact command before approving.`}</p>{result.command && <pre className="mt-3 whitespace-pre-wrap">{result.command}</pre>}<p className="ops-muted mt-3">{result.engine || "Bounded action catalog"} · Signed record {result.proof_id}</p>{result.approval_id && <button className="ops-link mt-3" onClick={onApprovals}>Review approvals →</button>}{result.evidence && <details className="mt-3"><summary>Inspect supporting observations</summary><pre className="overflow-auto max-h-64 text-xs mt-2">{JSON.stringify(result.evidence, null, 2)}</pre></details>}</div>}<p className="ops-muted mt-4">After execution, inspect the signed result in Devices → Activity. An execution result alone does not establish service recovery.</p></section>;
+}

@@ -149,3 +149,45 @@ the protected interface required by your fleet and firewall it to expected agent
 - Test coverage enforced (>=70%) in CI.
 
 See `docs/SECURITY.md` for the full threat model and residual risks.
+
+## 6. Inventory, incoming integrations, and operations reports
+
+Agent v1.1.0 collects hardware, disk volumes, network interfaces, and native
+software packages at startup and hourly. Enroll it with the per-device secret
+shown when registering a device. Inventory upload failure retries after five
+minutes without preventing heartbeat and command polling. The agent reads
+Windows uninstall registry entries, dpkg/rpm package databases on Linux, or
+system_profiler on macOS. Collection does not install or repair software.
+Uncollected fields and collection errors remain visible in the UI. Agent
+credentials are required for POST `/v1/devices/{id}/inventory`; inventory reads,
+cross-device software search, and endpoint activity require tenant user auth.
+Complete software snapshots emit added/removed package counts into the proof
+trail. Fresh inventory means received within 24 hours.
+
+The Integrations page supports custom metric JSON and the default alert arrays
+from Grafana Alerting and Prometheus Alertmanager. Create a named connection,
+copy the one-time credential, and configure a source webhook with either
+`X-Integration-Token: <credential>` or `Authorization: Bearer <credential>`.
+The source must be able to reach your deployed URL; a remote cloud service cannot
+reach a localhost-only app. Configure TLS for any non-local deployment.
+See the official [Grafana webhook settings](https://grafana.com/docs/grafana/latest/alerting/configure-notifications/manage-contact-points/integrations/webhook-notifier/)
+and [Alertmanager webhook configuration](https://prometheus.io/docs/alerting/latest/configuration/#webhook_config).
+
+Credentials are hashed at rest and can be revoked with Disable. Webhooks accept
+up to 200 records / 256 KiB, with a per-process 120-delivery/minute limit per
+connection. Matching alert labels identify a single alert across retries:
+repeated firing notifications update it, resolved notifications acknowledge it,
+and a later firing notification reopens it. The labeled test button creates an
+explicit test event. Delivery counts record accepted requests, not verified
+ongoing source health. Configure shared ingress limits when scaling workers.
+
+Reports show current device, inventory, alert, patch, and integration counts
+alongside 7/30/90-day ticket and execution activity. Daily ticket buckets use UTC.
+The cohort resolution rate counts resolved or closed tickets created within the
+selected period; cancelled tickets are not counted as resolved. CSV exports
+contain all current scoped rows and are independent of the activity period.
+Software exports contain one row per device/package. Credential hashes and tokens
+are excluded, and formula-like cells are escaped for spreadsheet use.
+
+The inventory/integration schema is migration `c4e9d7a2f601`. Docker API startup
+runs Alembic before serving. Back up the database before upgrading production.

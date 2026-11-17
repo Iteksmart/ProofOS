@@ -551,9 +551,9 @@ class ChangeOut(BaseModel):
 # --- Integrations (metrics webhook) ---
 class MetricIn(BaseModel):
     org_id: int
-    source: str = "prometheus"
-    host: str = ""
-    metrics: list[dict] = []
+    source: str = Field(default="prometheus", max_length=100)
+    host: str = Field(default="", max_length=255)
+    metrics: list[dict] = Field(default_factory=list, max_length=200)
 
 
 class IntegrationMetricOut(BaseModel):

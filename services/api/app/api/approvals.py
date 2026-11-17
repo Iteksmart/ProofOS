@@ -42,7 +42,7 @@ def list_approvals(
 
 @router.post("/{aid}/approve")
 def approve(aid: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    a = db.query(Approval).filter(Approval.id == aid).first()
+    a = db.query(Approval).filter(Approval.id == aid).with_for_update().first()
     if not a:
         raise HTTPException(status_code=404, detail="approval not found")
     _scope(user, a.org_id)
@@ -52,8 +52,6 @@ def approve(aid: int, db: Session = Depends(get_db), user=Depends(get_current_us
     a.status = "approved"
     a.decided_by = user.email
     a.decided_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(a)
     result = execute_approval(db, a)
     emit(
         db,

@@ -26,6 +26,7 @@ test("create a device and a ticket", async ({ page }) => {
   await bootstrap(page);
 
   await page.getByRole("button", { name: "Devices", exact: true }).click();
+  await page.locator("summary", { hasText: "Register an endpoint" }).click();
   await page.getByPlaceholder("hostname", { exact: true }).fill("e2e-ws-01");
   await page.getByPlaceholder("os", { exact: true }).fill("Linux");
   await page.getByPlaceholder("ip", { exact: true }).fill("10.0.0.11");
@@ -43,7 +44,7 @@ test("navigate every primary view", async ({ page }) => {
   const views = [
     "Analytics", "Devices", "Tickets", "Monitor", "Scripts", "Automations",
     "Proof", "AI Copilot", "Admin", "CMDB", "Knowledge", "Vault", "Changes",
-    "Time", "VMs", "Patches", "iTechSmart", "Audit", "Onboarding", "Consulting",
+    "Time", "VMs", "Patches", "Workspaces", "iTechSmart", "Audit", "Onboarding", "Consulting",
   ];
   for (const v of views) {
     await page.getByRole("button", { name: v, exact: true }).click();

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.proof import emit
 from app.core.security import actor_of, get_current_user
-from app.models.models import Ticket, TicketComment
+from app.models.models import Device, Ticket, TicketComment
 from app.schemas.schemas import TicketCommentCreate, TicketCreate, TicketOut, TicketUpdate
 
 router = APIRouter()
@@ -52,6 +52,14 @@ def _scope(user, org_id: int) -> None:
         raise HTTPException(status_code=403, detail="org scope mismatch")
 
 
+def _validate_device_scope(db: Session, org_id: int, device_id: int | None) -> None:
+    """Prevent a ticket from being linked to a device in another tenant."""
+    if device_id is None:
+        return
+    if not db.query(Device).filter(Device.id == device_id, Device.org_id == org_id).first():
+        raise HTTPException(status_code=404, detail="device not found in organization")
+
+
 @router.get("", response_model=list[TicketOut])
 def list_tickets(
     org_id: int,
@@ -80,6 +88,7 @@ def get_ticket(tid: int, db: Session = Depends(get_db), user=Depends(get_current
 @router.post("", response_model=TicketOut, status_code=201)
 def create_ticket(payload: TicketCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     _scope(user, payload.org_id)
+    _validate_device_scope(db, payload.org_id, payload.device_id)
     t = Ticket(
         org_id=payload.org_id,
         title=payload.title,
@@ -110,6 +119,8 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db), user=Dep
 def update_ticket(tid: int, payload: TicketUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     t = _load(db, tid)
     _scope(user, t.org_id)
+    if "device_id" in payload.model_fields_set:
+        _validate_device_scope(db, t.org_id, payload.device_id)
     if payload.status and payload.status != t.status:
         allowed = TRANSITIONS.get(t.status, set())
         if payload.status not in allowed:
@@ -126,10 +137,12 @@ def update_ticket(tid: int, payload: TicketUpdate, db: Session = Depends(get_db)
         from app.services.automation_engine import evaluate
 
         evaluate(db, t.org_id, f"ticket.{t.status}", {"ticket_id": t.id, "priority": t.priority, "status": t.status})
-    for field in ("title", "body", "priority", "assignee", "device_id", "due_at"):
+    for field in ("title", "body", "priority", "assignee", "due_at"):
         val = getattr(payload, field)
         if val is not None:
             setattr(t, field, val)
+    if "device_id" in payload.model_fields_set:
+        t.device_id = payload.device_id
     t.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(t)

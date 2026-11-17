@@ -9,6 +9,7 @@ from app.core.security import actor_of, get_current_user
 from app.models.models import Secret
 from app.schemas.schemas import SecretCreate, SecretOut
 from app.services.vault import decrypt, encrypt
+from app.services.privileged import authorize
 
 router = APIRouter()
 
@@ -50,7 +51,7 @@ def reveal_secret(sid: int, db: Session = Depends(get_db), user=Depends(get_curr
     if not s:
         raise HTTPException(status_code=404, detail="secret not found")
     _scope(user, s.org_id)
-    _require_admin(user)
+    authorize(db, user, "vault_reveal", s.id)
     value = decrypt(s.value_encrypted)
     emit(db, "vault.secret.revealed", {"id": s.id, "name": s.name}, actor_of(user), {"org_id": s.org_id}, {"reason": "reveal"})
     return {"id": s.id, "name": s.name, "value": value}

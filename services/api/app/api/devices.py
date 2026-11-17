@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets as _secrets
 from datetime import datetime, timezone
 
@@ -10,14 +11,20 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.proof import emit
 from app.core.pubsub import publish
-from app.core.security import actor_of, get_current_user, require_agent
-from app.models.models import Device, DeviceMetric, Org
+from app.core.security import actor_of, agent_actor, get_current_user, require_agent
+from app.models.models import Device, DeviceInventory, DeviceMetric, Org, Script, ScriptRun
+from app.schemas.inventory import InventoryIn
 from app.schemas.schemas import CommandIn, DeviceCreate, DeviceCreateOut, DeviceHeartbeat, DeviceMetricOut, DeviceOut
 from app.services.execution import queue_command
+from app.services.privileged import authorize
 
 router = APIRouter()
 
 VALID_STATUS = {"online", "offline", "stale", "maintenance", "unknown"}
+
+
+def _utc(value):
+    return value.replace(tzinfo=timezone.utc) if value and value.tzinfo is None else value
 
 
 def _scope_check(db: Session, user, org_id: int) -> None:
@@ -41,6 +48,77 @@ def list_devices(
     if q:
         query = query.filter(Device.hostname.ilike(f"%{q}%"))
     return query.limit(limit).all()
+
+
+@router.get("/inventory")
+def inventory_overview(org_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _scope_check(db, user, org_id)
+    snapshots = {s.device_id: s for s in db.query(DeviceInventory).filter(DeviceInventory.org_id == org_id).all()}
+    rows = []
+    for dev in db.query(Device).filter(Device.org_id == org_id).order_by(Device.hostname).all():
+        snap = snapshots.get(dev.id)
+        data = json.loads(snap.payload) if snap else {}
+        rows.append({"device_id": dev.id, "hostname": dev.hostname, "os": data.get("os") or dev.os,
+            "status": dev.status, "agent_version": dev.agent_version,
+            "hardware": data.get("hardware", {}), "software_count": len(data.get("software", [])),
+            "software_status": data.get("software_status", "unavailable"),
+            "collected_at": _utc(snap.collected_at) if snap else None})
+    return rows
+
+
+@router.get("/software")
+def software_inventory(org_id: int, q: str = Query("", max_length=100), db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _scope_check(db, user, org_id)
+    groups = {}
+    for snap, dev in db.query(DeviceInventory, Device).join(Device, Device.id == DeviceInventory.device_id).filter(DeviceInventory.org_id == org_id).all():
+        for package in json.loads(snap.payload).get("software", []):
+            if q.lower() not in f"{package['name']} {package.get('version', '')} {package.get('publisher', '')}".lower():
+                continue
+            key = (package["name"], package.get("version", ""), package.get("publisher", ""))
+            group = groups.setdefault(key, {**package, "devices": []})
+            group["devices"].append({"id": dev.id, "hostname": dev.hostname})
+    rows = sorted(groups.values(), key=lambda r: (-len(r["devices"]), r["name"].lower()))
+    return {"total": len(rows), "items": rows[:200]}
+
+
+@router.get("/{device_id}/activity")
+def device_activity(device_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    dev = get_device(device_id, db, user)
+    rows = db.query(ScriptRun, Script).join(Script, Script.id == ScriptRun.script_id).filter(
+        ScriptRun.device_id == dev.id, ScriptRun.org_id == dev.org_id).order_by(ScriptRun.id.desc()).limit(25).all()
+    return [{"id": r.id, "name": script.name, "status": "failed" if r.exit_code not in (None, 0) else r.status,
+        "created_at": _utc(r.created_at), "completed_at": _utc(r.completed_at), "exit_code": r.exit_code, "output": r.output} for r, script in rows]
+
+
+@router.get("/{device_id}/inventory")
+def get_inventory(device_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    dev = get_device(device_id, db, user)
+    snap = db.query(DeviceInventory).filter(DeviceInventory.device_id == dev.id).first()
+    return {"device_id": dev.id, "collected_at": _utc(snap.collected_at) if snap else None,
+        "inventory": json.loads(snap.payload) if snap else None}
+
+
+@router.post("/{device_id}/inventory")
+def receive_inventory(device_id: int, payload: InventoryIn, db: Session = Depends(get_db), agent: None = Depends(require_agent)):
+    dev = db.query(Device).filter(Device.id == device_id).with_for_update().first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="device not found")
+    snap = db.query(DeviceInventory).filter(DeviceInventory.device_id == device_id).first()
+    if not snap:
+        snap = DeviceInventory(org_id=dev.org_id, device_id=device_id)
+        db.add(snap)
+    old = json.loads(snap.payload or "{}")
+    previous = {(p["name"], p.get("version", "")) for p in old.get("software", [])}
+    current = {(p.name, p.version) for p in payload.software}
+    drift = {"added": len(current - previous), "removed": len(previous - current)} if old.get("software_status") == "complete" and payload.software_status == "complete" else None
+    snap.payload = payload.model_dump_json()
+    snap.collected_at = datetime.now(timezone.utc)
+    db.commit()
+    emit(db, "device.inventory.updated", {"device_id": device_id, "software_count": len(payload.software),
+        "software_status": payload.software_status, "software_changes": drift}, agent_actor(device_id),
+        {"org_id": dev.org_id, "device_id": device_id}, {"reason": "agent inventory collection"})
+    publish({"type": "inventory", "device_id": dev.id, "org_id": dev.org_id})
+    return {"ok": True, "collected_at": snap.collected_at}
 
 
 @router.get("/{device_id}", response_model=DeviceOut)
@@ -98,12 +176,11 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db), user=Dep
 @router.post("/{device_id}/command")
 def run_command(device_id: int, payload: CommandIn, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Run a shell command on a device via its agent (admin/manager, proof-logged)."""
-    if user.role not in {"admin", "manager"}:
-        raise HTTPException(status_code=403, detail="admin/manager only")
     dev = db.query(Device).filter(Device.id == device_id).first()
     if not dev:
         raise HTTPException(status_code=404, detail="device not found")
     _scope_check(db, user, dev.org_id)
+    authorize(db, user, "device_command", dev.id, payload.body)
     run = queue_command(db, dev.org_id, device_id, payload.body, actor_of(user))
     return {"run_id": run.id, "device_id": device_id, "status": "queued"}
 
@@ -144,6 +221,7 @@ def delete_device(device_id: int, db: Session = Depends(get_db), user=Depends(ge
     dev = db.query(Device).filter(Device.id == device_id).first()
     if not dev:
         raise HTTPException(status_code=404, detail="device not found")
+    _scope_check(db, user, dev.org_id)
     emit(
         db,
         "device.deleted",

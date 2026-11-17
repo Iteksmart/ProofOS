@@ -43,6 +43,143 @@ def test_health(client):
     assert body["db"] == "ok"
 
 
+def test_explicit_remediation_signed_result_and_tamper_detection(auth_client, monkeypatch):
+    client, org_id, _ = auth_client
+    dev = client.post("/v1/devices", json={"org_id": org_id, "hostname": "proof-test", "os": "Linux"}).json()
+    monkeypatch.setattr("app.services.llm.get_llm_client", lambda: None)
+    investigation = client.post(f"/v1/ai/investigate/{dev['id']}", json={})
+    assert investigation.status_code == 200, investigation.text
+    assert investigation.json()["proof_id"]
+    assert investigation.json()["evidence"]["device_id"] == dev["id"]
+    plan = client.post(f"/v1/ai/remediate/{dev['id']}", json={"action": "diagnose_disk"})
+    assert plan.status_code == 201, plan.text
+    plan = plan.json()
+    assert plan["requires_approval"] and plan["command"] == "df -h"
+    approval = client.post(f"/v1/approvals/{plan['approval_id']}/approve")
+    assert approval.status_code == 200, approval.text
+    run_id = approval.json()["result"]["run_id"]
+    assert client.get(f"/v1/scripts/runs/{run_id}/evidence").json()["signed_result_matches"] is False
+    result = client.post(f"/v1/scripts/runs/{run_id}/complete", headers={"X-Agent-Token": dev["device_secret"]}, json={"output": "filesystem observation", "exit_code": 0})
+    assert result.status_code == 200
+    evidence = client.get(f"/v1/scripts/runs/{run_id}/evidence").json()
+    assert evidence["signed_result_matches"] is True
+    assert evidence["recovery_verified"] is False
+    assert any(r["body"]["payload"].get("approval_id") == plan["approval_id"] for r in evidence["receipts"])
+    from app.core.db import SessionLocal
+    from app.models.models import ScriptRun
+    with SessionLocal() as db:
+        db.get(ScriptRun, run_id).output = "tampered"
+        db.commit()
+    assert client.get(f"/v1/scripts/runs/{run_id}/evidence").json()["signed_result_matches"] is False
+    assert client.post(f"/v1/ai/remediate/{dev['id']}", json={"action": "restart_print_spooler"}).status_code == 422
+    other = client.post("/v1/auth/bootstrap", json={"name": "Other remediation tenant"}).json()
+    client.headers["Authorization"] = f"Bearer {other['access_token']}"
+    assert client.get(f"/v1/scripts/runs/{run_id}/evidence").status_code == 404
+    assert client.post(f"/v1/ai/investigate/{dev['id']}", json={}).status_code == 404
+
+
+def test_schema_migrations_have_one_head():
+    from pathlib import Path
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    config = Config()
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
+    assert len(ScriptDirectory.from_config(config).get_heads()) == 1
+
+
+def test_inventory_agent_auth_and_tenant_isolation(auth_client):
+    client, org_id, _ = auth_client
+    device = client.post("/v1/devices", json={"org_id": org_id, "hostname": "inventory-host"}).json()
+    endpoint = f"/v1/devices/{device['id']}/inventory"
+    payload = {"os": "Linux", "hardware": {"memory_bytes": 17179869184, "logical_cores": 8},
+        "software": [{"name": "openssl", "version": "3.0"}], "software_status": "complete"}
+    assert client.post(endpoint, json=payload).status_code == 401
+    headers = {"X-Agent-Token": device["device_secret"]}
+    assert client.post(endpoint, json=payload, headers=headers).status_code == 200
+    assert client.get(endpoint).json()["inventory"]["software"][0]["name"] == "openssl"
+    assert client.get(f"/v1/devices/inventory?org_id={org_id}").json()[0]["software_count"] == 1
+    other = client.post("/v1/auth/bootstrap", json={"name": "Other inventory org"}).json()
+    client.headers["Authorization"] = f"Bearer {other['access_token']}"
+    assert client.get(endpoint).status_code == 403
+    assert client.delete(f"/v1/devices/{device['id']}").status_code == 403
+    assert client.get(f"/v1/devices/inventory?org_id={other['org']['id']}").json() == []
+
+
+def test_integration_credentials_validation_and_revocation(auth_client):
+    client, org_id, _ = auth_client
+    connection = client.post(f"/v1/integrations/connections?org_id={org_id}", json={"name": "Production Grafana", "provider": "grafana"})
+    assert connection.status_code == 201
+    connection = connection.json()
+    endpoint = connection["webhook_path"]
+    headers = {"X-Integration-Token": connection["token"]}
+    data = {"alerts": [{"labels": {"alertname": "Database latency", "severity": "critical"}, "annotations": {"summary": "Database is slow"}}]}
+    assert client.post(endpoint, json=data).status_code == 401
+    assert client.post(endpoint, headers=headers, json={"alerts": ["bad"]}).status_code == 422
+    assert client.post(endpoint, headers=headers, json=data).json()["accepted"] == 1
+    rows = client.get(f"/v1/integrations/connections?org_id={org_id}").json()
+    assert rows[0]["received_count"] == 1
+    assert "token" not in rows[0] and "token_hash" not in rows[0]
+    alerts = client.get(f"/v1/monitor/alerts?org_id={org_id}").json()
+    assert any(a["severity"] == "critical" and "Database is slow" in a["message"] for a in alerts)
+    assert client.post(endpoint, headers=headers, json=data).status_code == 202
+    assert len(client.get(f"/v1/monitor/alerts?org_id={org_id}").json()) == len(alerts)
+    data["status"] = "resolved"
+    assert client.post(endpoint, headers={"Authorization": f"Bearer {connection['token']}"}, json=data).status_code == 202
+    assert client.get(f"/v1/monitor/alerts?org_id={org_id}").json()[0]["acked"] is True
+    assert client.post(f"/v1/integrations/connections/{connection['id']}/disable").status_code == 200
+    assert client.post(endpoint, headers=headers, json=data).status_code == 401
+
+
+def test_reporting_counts_full_dataset_and_safe_export(auth_client):
+    client, org_id, _ = auth_client
+    from app.core.db import SessionLocal
+    from app.models.models import Device
+    with SessionLocal() as db:
+        db.add_all([Device(org_id=org_id, hostname=f"host-{i}") for i in range(105)])
+        db.add(Device(org_id=org_id, hostname="=HYPERLINK(\"bad\")"))
+        db.commit()
+    response = client.get(f"/v1/reports/operations?org_id={org_id}")
+    assert response.status_code == 200
+    assert response.json()["devices"]["total"] == 106
+    assert response.json()["tickets"]["resolution_rate"] is None
+    exported = client.get(f"/v1/reports/export?org_id={org_id}&kind=devices")
+    assert exported.status_code == 200
+    assert "'=HYPERLINK" in exported.text
+    assert "token_hash" not in exported.text
+    assert client.get(f"/v1/reports/operations?org_id={org_id + 100}").status_code == 403
+    assert client.get(f"/v1/reports/export?org_id={org_id + 100}&kind=devices").status_code == 403
+
+
+def test_search_software_and_device_activity_are_scoped(auth_client):
+    client, org_id, _ = auth_client
+    device = client.post("/v1/devices", json={"org_id": org_id, "hostname": "searchable-endpoint"}).json()
+    headers = {"X-Agent-Token": device["device_secret"]}
+    payload = {"software": [{"name": "Application One", "version": "2.0"}], "software_status": "complete"}
+    assert client.post(f"/v1/devices/{device['id']}/inventory", headers=headers, json=payload).status_code == 200
+    rows = client.get(f"/v1/devices/software?org_id={org_id}&q=application").json()
+    assert rows["total"] == 1 and rows["items"][0]["devices"][0]["id"] == device["id"]
+    assert "Application One" in client.get(f"/v1/reports/export?org_id={org_id}&kind=software").text
+    assert client.get("/v1/search?q=searchable").json()[0]["id"] == device["id"]
+    assert client.get("/v1/search?q=%25%25").json() == []
+    assert client.get(f"/v1/devices/{device['id']}/activity").json() == []
+    other = client.post("/v1/auth/bootstrap", json={"name": "Other search tenant"}).json()
+    client.headers["Authorization"] = f"Bearer {other['access_token']}"
+    assert client.get("/v1/search?q=searchable").json() == []
+    assert client.get(f"/v1/devices/{device['id']}/activity").status_code == 403
+
+
+def test_patch_status_waits_for_agent_result(auth_client):
+    client, org_id, _ = auth_client
+    device = client.post("/v1/devices", json={"org_id": org_id, "hostname": "patch-result", "os": "Linux"}).json()
+    patch = client.post("/v1/patches", json={"org_id": org_id, "device_id": device["id"], "name": "OS update"}).json()
+    run = client.post(f"/v1/patches/{patch['id']}/deploy").json()
+    assert run["status"] == "deploying"
+    assert client.post(f"/v1/patches/{patch['id']}/deploy").status_code == 409
+    endpoint = f"/v1/scripts/runs/{run['run_id']}/complete"
+    assert client.post(endpoint, json={"output": "failed", "exit_code": 1}, headers={"X-Agent-Token": device["device_secret"]}).status_code == 200
+    assert client.get(f"/v1/patches?org_id={org_id}").json()[0]["status"] == "failed"
+
+
 def test_login_rate_limiter_ignores_untrusted_forwarded_header():
     from starlette.requests import Request
 

@@ -6,9 +6,10 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.proof import emit
 from app.core.security import actor_of, get_current_user
-from app.models.models import Device, Patch
+from app.models.models import Device, Patch, Script, ScriptRun
 from app.schemas.schemas import PatchCreate, PatchOut
 from app.services.execution import queue_command
+from app.services import kill_switch
 
 router = APIRouter()
 
@@ -61,20 +62,30 @@ def register_patch(payload: PatchCreate, db: Session = Depends(get_db), user=Dep
 
 @router.post("/{pid}/deploy")
 def deploy_patch(pid: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Queue the OS-specific update command on the device's agent."""
+    """Queue an OS-specific update; installation is confirmed only by the agent result."""
     p = db.query(Patch).filter(Patch.id == pid).first()
     if not p:
         raise HTTPException(status_code=404, detail="patch not found")
     _scope(user, p.org_id)
     _require_admin(user)
+    kill_switch.require_disengaged(db)
     dev = db.query(Device).filter(Device.id == p.device_id).first()
     os_key = "windows" if (dev.os or "").lower().startswith("windows") else "linux"
     cmd = DEPLOY_CMD[os_key]
-    run = queue_command(db, p.org_id, p.device_id, cmd, actor_of(user))
-    p.status = "installed"
+    if p.status == "deploying":
+        raise HTTPException(status_code=409, detail="patch deployment is already in progress")
+    # Keep the patch-to-run relationship explicit in the script name.  The agent
+    # completion handler uses it to mark the patch installed or failed; queued
+    # work must never be presented as an installed patch.
+    script = Script(org_id=p.org_id, name=f"patch-deploy:{p.id}", body=cmd, version="1.0.0")
+    db.add(script)
+    db.flush()
+    run = ScriptRun(org_id=p.org_id, device_id=p.device_id, script_id=script.id, status="pending")
+    db.add(run)
+    p.status = "deploying"
     db.commit()
     db.refresh(p)
-    emit(db, "patch.deployed", {"patch_id": p.id, "name": p.name, "run_id": run.id}, actor_of(user), {"org_id": p.org_id, "device_id": p.device_id}, {"reason": "patch deployment"})
+    emit(db, "patch.deployment.queued", {"patch_id": p.id, "name": p.name, "run_id": run.id}, actor_of(user), {"org_id": p.org_id, "device_id": p.device_id}, {"reason": "patch deployment"})
     return {"patch_id": p.id, "status": p.status, "run_id": run.id, "command": cmd}
 
 

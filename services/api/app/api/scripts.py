@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.proof import emit
+from app.core.proof import emit, decode_canonical, verify, public_key_hex
 from app.core.security import actor_of, agent_actor, get_current_user, require_agent, verify_agent
-from app.models.models import Device, Script, ScriptRun
+from app.models.models import Device, Patch, ProofRecord, Script, ScriptRun
 from app.schemas.schemas import RunComplete, ScriptCreate, ScriptOut, ScriptRunOut
 from app.services import kill_switch
 
@@ -106,21 +107,80 @@ def complete_run(run_id: int, payload: RunComplete, db: Session = Depends(get_db
     if not r:
         raise HTTPException(status_code=404, detail="run not found")
     verify_agent(request, db, r.device_id)
+    if r.completed_at is not None:
+        if r.exit_code != payload.exit_code or r.output != (payload.output or "")[:20000]:
+            raise HTTPException(status_code=409, detail="run already completed with a different result")
+        return {"ok": True, "run_id": r.id}
     r.status = "completed"
     r.output = (payload.output or "")[:20000]
     r.exit_code = payload.exit_code
     r.completed_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(r)
+    script = db.query(Script).filter(Script.id == r.script_id).first()
+    patch = None
+    if script and script.name.startswith("patch-deploy:"):
+        try:
+            patch_id = int(script.name.removeprefix("patch-deploy:"))
+        except ValueError:
+            patch_id = None
+        if patch_id:
+            patch = (
+                db.query(Patch)
+                .filter(Patch.id == patch_id, Patch.org_id == r.org_id, Patch.device_id == r.device_id)
+                .first()
+            )
+            if patch:
+                patch.status = "installed" if payload.exit_code == 0 else "failed"
+    db.flush()
     emit(
         db,
         "script.completed",
-        {"run_id": r.id, "device_id": r.device_id, "exit_code": r.exit_code},
+        {"run_id": r.id, "device_id": r.device_id, "exit_code": r.exit_code,
+         "command_sha256": hashlib.sha256((script.body if script else "").encode()).hexdigest(),
+         "output_sha256": hashlib.sha256(r.output.encode()).hexdigest(), "output_truncated": len(payload.output or "") > 20000},
         agent_actor(r.device_id),
         {"org_id": r.org_id, "device_id": r.device_id},
         {"reason": "agent exec"},
     )
+    if patch:
+        emit(
+            db,
+            "patch.deployment.completed",
+            {"patch_id": patch.id, "run_id": r.id, "status": patch.status, "exit_code": r.exit_code},
+            agent_actor(r.device_id),
+            {"org_id": r.org_id, "device_id": r.device_id},
+            {"reason": "agent-reported patch result"},
+        )
     return {"ok": True, "run_id": r.id}
+
+
+@router.get("/runs/{run_id}/evidence")
+def run_evidence(run_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    run = db.query(ScriptRun).filter(ScriptRun.id == run_id, ScriptRun.org_id == user.org_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found in organization")
+    script = db.get(Script, run.script_id)
+    receipts = []
+    command_hash = hashlib.sha256((script.body if script else "").encode()).hexdigest()
+    output_hash = hashlib.sha256(run.output.encode()).hexdigest()
+    result_matches = False
+    for record in db.query(ProofRecord).filter(ProofRecord.org_id == user.org_id,
+            ProofRecord.what.in_(["command.queued", "script.completed"])).order_by(ProofRecord.created_at).yield_per(200):
+        body = decode_canonical(record) or {}
+        payload = body.get("payload", {})
+        if payload.get("run_id") != run.id:
+            continue
+        verification = verify(record)
+        if record.what == "script.completed":
+            result_matches = verification["verified"] and payload.get("command_sha256") == command_hash and payload.get("output_sha256") == output_hash and payload.get("exit_code") == run.exit_code
+        receipts.append({"id": record.id, "body": body, "canonical_bytes": record.canonical_bytes,
+            "signature": record.signature, "prev_hash": record.prev_hash, "payload_digest": record.payload_digest, "verification": verification})
+    from app.services.recovery import evaluate
+
+    recovery = evaluate(db, run)
+    return {"run_id": run.id, "device_id": run.device_id, "status": run.status, "exit_code": run.exit_code,
+        "output": run.output, "command_sha256": command_hash, "output_sha256": output_hash,
+        "signed_result_matches": result_matches, "public_key_hex": public_key_hex(), "receipts": receipts,
+        "recovery_verified": recovery["verified"], "recovery": recovery, "trust_note": "Signatures verify recorded agent results, not endpoint integrity or service recovery. Pin the public key independently."}
 
 
 @router.get("/{script_id}", response_model=ScriptOut)

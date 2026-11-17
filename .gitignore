@@ -18,6 +18,7 @@ build/
 .env
 .env.local
 keys-decrypted/
+.local-backups/
 
 # Test artifacts
 *.db
@@ -37,3 +38,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# Screenshots captured by e2e runs and reviews
+/*.png

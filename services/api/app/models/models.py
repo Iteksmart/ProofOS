@@ -76,6 +76,39 @@ class DeviceMetric(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
+class DeviceInventory(Base):
+    __tablename__ = "device_inventory"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), unique=True, index=True)
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    collected_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class IntegrationConnection(Base):
+    __tablename__ = "integration_connections"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    provider: Mapped[str] = mapped_column(String(30))
+    token_hash: Mapped[str] = mapped_column(String(64))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    received_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_received_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class IntegrationAlertLink(Base):
+    __tablename__ = "integration_alert_links"
+    __table_args__ = (UniqueConstraint("connection_id", "external_key", name="uq_integration_alert_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    connection_id: Mapped[int] = mapped_column(ForeignKey("integration_connections.id"))
+    external_key: Mapped[str] = mapped_column(String(64))
+    alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id"))
+    status: Mapped[str] = mapped_column(String(20), default="firing")
+
+
 class TicketComment(Base):
     __tablename__ = "ticket_comments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -538,3 +571,81 @@ class ItsmLink(Base):
     itsm_updated_at: Mapped[str] = mapped_column(String(40), default="")
     receipt_id: Mapped[str] = mapped_column(String(80), default="")
     last_synced_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ServiceNode(Base):
+    __tablename__ = "service_nodes"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_service_org_name"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id"), nullable=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+
+
+class ServiceDependency(Base):
+    __tablename__ = "service_dependencies"
+    __table_args__ = (UniqueConstraint("org_id", "source_id", "target_id", name="uq_service_dependency"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("service_nodes.id"))
+    target_id: Mapped[int] = mapped_column(ForeignKey("service_nodes.id"))
+    origin: Mapped[str] = mapped_column(String(30), default="manual")
+    observed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class TelemetryEvent(Base):
+    __tablename__ = "telemetry_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(10), index=True)
+    service: Mapped[str] = mapped_column(String(255), index=True)
+    trace_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    span_id: Mapped[str] = mapped_column(String(16), default="")
+    parent_span_id: Mapped[str] = mapped_column(String(16), default="")
+    name: Mapped[str] = mapped_column(String(255), default="")
+    severity: Mapped[str] = mapped_column(String(30), default="INFO")
+    body: Mapped[str] = mapped_column(Text, default="")
+    duration_ms: Mapped[float] = mapped_column(Float, default=0)
+    attributes: Mapped[str] = mapped_column(Text, default="{}")
+    observed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class AccessGrant(Base):
+    __tablename__ = "access_grants"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    approver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    capability: Mapped[str] = mapped_column(String(30))
+    target_id: Mapped[int] = mapped_column(Integer)
+    command: Mapped[str] = mapped_column(Text, default="")
+    reason: Mapped[str] = mapped_column(String(1000))
+    minutes: Mapped[int] = mapped_column(Integer, default=15)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class RecoveryPolicy(Base):
+    __tablename__ = "recovery_policies"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("script_runs.id"), unique=True)
+    kind: Mapped[str] = mapped_column(String(10))
+    target: Mapped[str] = mapped_column(String(1000))
+    expected_status: Mapped[int] = mapped_column(Integer, default=200)
+    max_latency_ms: Mapped[float] = mapped_column(Float, default=3000)
+    samples_required: Mapped[int] = mapped_column(Integer, default=3)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class RecoveryObservation(Base):
+    __tablename__ = "recovery_observations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    policy_id: Mapped[int] = mapped_column(ForeignKey("recovery_policies.id"), index=True)
+    payload: Mapped[str] = mapped_column(Text)
+    proof_id: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 
 from fastapi import HTTPException
@@ -12,7 +13,7 @@ from app.models.models import Approval, Device, Script, ScriptRun
 from app.services import kill_switch
 
 
-def queue_command(db: Session, org_id: int, device_id: int, body: str, who: dict) -> ScriptRun:
+def queue_command(db: Session, org_id: int, device_id: int, body: str, who: dict, approval_id: int | None = None) -> ScriptRun:
     """Queue an ad-hoc shell command for a device's agent (via the script queue)."""
     kill_switch.require_disengaged(db)
     if not db.query(Device).filter(Device.id == device_id, Device.org_id == org_id).first():
@@ -22,12 +23,12 @@ def queue_command(db: Session, org_id: int, device_id: int, body: str, who: dict
     db.flush()
     run = ScriptRun(org_id=org_id, device_id=device_id, script_id=s.id, status="pending")
     db.add(run)
-    db.commit()
-    db.refresh(run)
+    db.flush()
     emit(
         db,
         "command.queued",
-        {"device_id": device_id, "run_id": run.id, "body": body[:200]},
+        {"device_id": device_id, "run_id": run.id, "body": body[:200], "approval_id": approval_id,
+         "command_sha256": hashlib.sha256(body.encode()).hexdigest()},
         who,
         {"org_id": org_id, "device_id": device_id},
         {"reason": "remote command"},
@@ -41,7 +42,7 @@ def execute_approval(db: Session, approval: Approval) -> dict:
     payload = json.loads(approval.payload or "{}")
     who = {"actor_id": approval.decided_by or "approver", "actor_type": "user"}
     if approval.kind in {"command", "upgrade"}:
-        run = queue_command(db, approval.org_id, payload.get("device_id"), payload.get("body", ""), who)
+        run = queue_command(db, approval.org_id, payload.get("device_id"), payload.get("body", ""), who, approval_id=approval.id)
         return {"run_id": run.id}
     if approval.kind == "script":
         device_id = payload.get("device_id")
