@@ -201,6 +201,7 @@ class ScriptRunOut(BaseModel):
     output: str
     exit_code: int | None = None
     created_at: datetime | None = None
+    started_at: datetime | None = None
     completed_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

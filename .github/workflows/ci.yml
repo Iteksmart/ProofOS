@@ -57,6 +57,21 @@ jobs:
       - name: Test vendor adapters
         run: python -m pytest packages/mcp/tests -q
 
+  agent:
+    name: Endpoint agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install agent dependencies
+        run: pip install -r apps/agent/requirements.txt pytest
+      - name: Test the agent
+        run: python -m pytest apps/agent/tests -q
+      - name: Published build matches source
+        run: python apps/agent/build.py --check
+
   web:
     name: Web build
     runs-on: ubuntu-latest

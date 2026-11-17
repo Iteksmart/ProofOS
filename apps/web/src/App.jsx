@@ -4,7 +4,7 @@ import { DeviceActivity, InventoryDetail, InventoryPage, IntegrationsPage, Repor
 import CommandMenu from "./CommandMenu";
 import InvestigationPanel from "./InvestigationPanel";
 import { AccessPage, RecoveryPanel, TelemetryPage, TopologyPage } from "./Evidence";
-import { AgentInstall, NetworkDiscovery, PatchCenter, ThresholdsPanel } from "./Rmm";
+import { AgentInstall, CommandConsole, NetworkDiscovery, PatchCenter, ThresholdsPanel } from "./Rmm";
 import { BillingPage, CustomersPage, TicketAssist } from "./Psa";
 import { AnchorsPanel, SloPanel, VulnerabilitiesPage } from "./Assurance";
 
@@ -1222,16 +1222,8 @@ export default function App() {
                   {devicePatches.length === 0 ? <p className="text-sm text-slate-500">No patch inventory has been reported for this device. Run a scan to collect it.</p> : <div className="divide-y divide-slate-800 rounded border border-slate-800 overflow-hidden">{devicePatches.map((p) => <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs bg-slate-950"><div><div className="font-medium">{p.name}</div><div className="text-slate-500">{p.category} · {p.current_version || "unknown"} → {p.available_version || "latest"}</div></div><div className="flex items-center gap-2"><HealthPill status={p.severity} /><span className="text-slate-400">{p.status}</span>{["pending", "failed"].includes(p.status) && <button className="text-violet-300 hover:underline" onClick={async () => { const deployment = await api(`/v1/patches/${p.id}/deploy`, { method: "POST", body: "{}" }); const refreshed = await api(`/v1/patches?org_id=${orgId}&device_id=${selDevice.id}`); setDevicePatches(Array.isArray(refreshed) ? refreshed : []); setErr(`Patch deployment queued as run #${deployment.run_id}; it will be marked installed only after the agent reports success.`); }}>Deploy</button>}{p.status === "deploying" && <span className="text-amber-300">Awaiting agent</span>}</div></div>)}</div>}
                 </div>}
                 {devicePanelTab === "operations" && <><div className="mb-3">
-                  <h3 className="text-xs text-slate-400 mb-1">Remote command (via agent)</h3>
-                  <div className="flex gap-2">
-                    <input className={inputCls} placeholder="e.g. df -h / ipconfig / show version" value={cmdBody} onChange={(e) => setCmdBody(e.target.value)} />
-                    <button className="bg-sky-600 px-3 py-2 rounded text-sm whitespace-nowrap" onClick={async () => {
-                      if (!cmdBody.trim()) return;
-                      await api(`/v1/devices/${selDevice.id}/command`, { method: "POST", body: JSON.stringify({ body: cmdBody, description: "console" }) });
-                      setCmdBody("");
-                      setErr("Command queued — agent will execute and log output under Scripts → run history.");
-                    }}>Run</button>
-                  </div>
+                  <h3 className="text-xs text-slate-400 mb-1">Command console</h3>
+                  <CommandConsole api={api} device={selDevice} canWrite={canWrite} />
                 </div>
                 <div className="flex gap-4 mb-2 flex-wrap">
                   <button className="text-xs text-sky-400 hover:underline" onClick={async () => { const j = await api(`/v1/remote/devices/${selDevice.id}/remote-session`, { method: "POST", body: JSON.stringify({ kind: "console" }) }); setRemoteSession(j); }}>Open console session</button>

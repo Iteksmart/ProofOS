@@ -760,3 +760,15 @@ tr.row-selected td { background: var(--acc-soft); }
 .portal-thread small { margin-left: 8px; color: var(--tx-dim); }
 .portal-thread p { white-space: pre-wrap; font-size: 14px; margin-top: 2px; }
 @media (max-width: 760px) { .portal-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Agent command console */
+.command-console { display: grid; gap: 8px; }
+.command-input { display: flex; gap: 8px; align-items: flex-start; }
+.command-input select { flex: none; }
+.command-input textarea { flex: 1; min-width: 0; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 8px 10px; }
+.command-run { border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; }
+.command-run header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; padding: 8px 10px; background: color-mix(in oklch, var(--tx-strong) 4%, transparent); }
+.command-run header code { font-size: 12.5px; color: var(--tx-strong); overflow-wrap: anywhere; }
+.command-meta { display: flex; gap: 8px; align-items: center; }
+.command-run pre { margin: 0; padding: 10px; max-height: 320px; overflow: auto; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; background: oklch(0.13 0.01 275); color: oklch(0.9 0.01 275); }
+@media (max-width: 640px) { .command-input { flex-wrap: wrap; } .command-input textarea { flex-basis: 100%; } }

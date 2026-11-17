@@ -235,8 +235,14 @@ Roles:
 
 ### 7.2 Install the agent
 
+Copy the command from the **Install agent** panel. It downloads
+`proofos-agent.pyz` from the API, enrolls it with the device secret and the
+pinned server signing key, and installs it as a service. See
+`apps/agent/README.md`. In short:
+
 ```powershell
-python agent.py --api http://<proofos-host>:8000 --device-id <id> --token <device_secret>
+py proofos-agent.pyz enroll --api http://<proofos-host>:8000 --device-id <id> --token <device_secret> --server-key <hex>
+py proofos-agent.pyz install-service
 ```
 
 The agent then:
@@ -477,7 +483,7 @@ Terminate TLS at nginx/Caddy/Cloudflare. Keep `:8000`, `:8113`, `:8096` internal
 |---|---|
 | `403 org scope mismatch` | Wrong `org_id` or role; use your own org id |
 | `401 unauthorized` on iTechSmart seal | ProofLink Plus has separate auth; MCP key only covers MCP tools |
-| Device stuck `offline` | Agent not heartbeating; check `agent.py` connectivity + token |
+| Device stuck `offline` | Agent not heartbeating; run `proofos-agent status` on the endpoint to check connectivity, key and token |
 | Proof verify fails | Chain tampered or re-seeded; restore from backup |
 | SQLite `bad parameter` (dev) | Use Postgres in production; SQLite pool fixed for concurrent reads |
 | SSO login loops | Check `WEB_URL` + redirect URI match exactly |

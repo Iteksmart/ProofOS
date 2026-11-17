@@ -139,21 +139,99 @@ export function ThresholdsPanel({ api, canWrite }) {
 
 export function AgentInstall({ apiBase, device }) {
   const api = apiBase || window.location.origin;
-  const download = `${window.location.origin}/downloads/proofos-agent.py`;
+  const [key, setKey] = useState("");
+  const [keyError, setKeyError] = useState("");
+  useEffect(() => {
+    fetch(`${api}/v1/agent/server-key`).then((r) => r.json()).then((j) => setKey(j.public_key))
+      .catch(() => setKeyError("Could not read the server signing key; the agent will pin it on first contact instead."));
+  }, [api]);
   const [os, setOs] = useState(/windows/i.test(device.os || "") ? "windows" : /mac/i.test(device.os || "") ? "macos" : "linux");
-  const args = `--api ${api} --device-id ${device.id} --token ${device.device_secret}`;
+  const enroll = `enroll --api ${api} --device-id ${device.id} --token ${device.device_secret}${key ? ` --server-key ${key}` : ""}`;
+  const deps = "httpx psutil websockets cryptography";
+  const posix = `curl -fsSL ${api}/v1/agent/download -o proofos-agent.pyz && sudo python3 -m pip install ${deps} && sudo python3 proofos-agent.pyz ${enroll} && sudo python3 proofos-agent.pyz install-service`;
   const commands = {
-    linux: `curl -fsSL ${download} -o proofos-agent.py && python3 -m pip install --user httpx psutil && python3 proofos-agent.py ${args}`,
-    macos: `curl -fsSL ${download} -o proofos-agent.py && python3 -m pip install --user httpx psutil && python3 proofos-agent.py ${args}`,
-    windows: `Invoke-WebRequest ${download} -OutFile proofos-agent.py; py -m pip install --user httpx psutil; py proofos-agent.py ${args}`,
+    linux: posix,
+    macos: posix,
+    windows: `Invoke-WebRequest ${api}/v1/agent/download -OutFile proofos-agent.pyz; py -m pip install ${deps}; py proofos-agent.pyz ${enroll}; py proofos-agent.pyz install-service`,
   };
   const [copied, setCopied] = useState(false);
   return (
     <div className="agent-install">
-      <div className="segmented" role="group" aria-label="Operating system">{[["windows", "Windows (PowerShell)"], ["linux", "Linux"], ["macos", "macOS"]].map(([k, l]) => <button key={k} type="button" aria-pressed={os === k} onClick={() => { setOs(k); setCopied(false); }}>{l}</button>)}</div>
+      <div className="segmented" role="group" aria-label="Operating system">{[["windows", "Windows (admin PowerShell)"], ["linux", "Linux"], ["macos", "macOS"]].map(([k, l]) => <button key={k} type="button" aria-pressed={os === k} onClick={() => { setOs(k); setCopied(false); }}>{l}</button>)}</div>
       <pre aria-label="Install command">{commands[os]}</pre>
-      <div className="ops-head-actions"><button className="ops-button primary" type="button" onClick={() => { navigator.clipboard?.writeText(commands[os]); setCopied(true); }}>{copied ? "Copied" : "Copy command"}</button><span className="ops-muted">Requires Python 3.10+. The secret is shown once; rotate it from the device's Operations tab.</span></div>
+      <div className="ops-head-actions"><button className="ops-button primary" type="button" onClick={() => { navigator.clipboard?.writeText(commands[os]); setCopied(true); }}>{copied ? "Copied" : "Copy command"}</button><span className="ops-muted">Installs ProofOS Agent 2 as a service that starts at boot. It runs only jobs signed by this server's key{key ? " (pinned in the command)" : ""}. Requires Python 3.10+. The secret is shown once.</span></div>
+      {keyError && <p className="ops-muted">{keyError}</p>}
     </div>
+  );
+}
+
+const SHELLS = [["", "Default shell"], ["powershell", "PowerShell"], ["pwsh", "PowerShell 7"], ["bash", "bash"], ["python", "Python"]];
+const LIVE = new Set(["pending", "running", "cancelling"]);
+
+export function CommandConsole({ api, device, canWrite }) {
+  const windows = /windows/i.test(device.os || "");
+  const [body, setBody] = useState("");
+  const [shell, setShell] = useState(windows ? "powershell" : "");
+  const [runs, setRuns] = useState([]);
+  const [error, setError] = useState("");
+  const active = runs.filter((r) => LIVE.has(r.status)).map((r) => r.id).join(",");
+  useEffect(() => {
+    if (!active) return undefined;
+    const timer = setInterval(async () => {
+      const ids = active.split(",").map(Number);
+      const fresh = (await Promise.all(ids.map((id) => api(`/v1/scripts/runs/${id}`).catch(() => null)))).filter(Boolean);
+      setRuns((prev) => prev.map((r) => { const f = fresh.find((x) => x.id === r.id); return f ? { ...r, ...f } : r; }));
+    }, 700);
+    return () => clearInterval(timer);
+  }, [active]);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!body.trim()) return;
+    setError("");
+    try {
+      const text = shell ? `#proofos:shell=${shell}\n${body}` : body;
+      const queued = await api(`/v1/devices/${device.id}/command`, { method: "POST", body: JSON.stringify({ body: text, description: "console" }) });
+      if (!queued.run_id) { setError(queued.detail || "The command needs approval before it can run; see Admin → Approvals."); return; }
+      setRuns((prev) => [{ id: queued.run_id, command: body, shell: shell || "default", status: "pending", output: "", exit_code: null }, ...prev].slice(0, 8));
+      setBody("");
+    } catch (err) { setError(err.message); }
+  }
+
+  async function cancel(id) {
+    try {
+      const j = await api(`/v1/scripts/runs/${id}/cancel`, { method: "POST" });
+      setRuns((prev) => prev.map((x) => (x.id === id ? { ...x, status: j.status } : x)));
+    } catch (err) { setError(err.message); }
+  }
+
+  const tone = (r) => (r.status === "completed" ? (r.exit_code === 0 ? "good" : "bad") : ["cancelled", "expired"].includes(r.status) ? "warn" : "neutral");
+  const label = (r) => (r.status === "pending" ? "waiting for agent" : r.status === "completed" ? `exit ${r.exit_code}` : r.status);
+  return (
+    <section className="command-console" aria-label="Command console">
+      <form onSubmit={submit} className="command-input">
+        <label className="sr-only" htmlFor={`shell-${device.id}`}>Interpreter</label>
+        <select id={`shell-${device.id}`} value={shell} onChange={(e) => setShell(e.target.value)}>{SHELLS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+        <textarea aria-label="Command" rows={body.includes("\n") ? 4 : 1} placeholder={windows ? "Get-Service | Where Status -eq Running" : "df -h"} value={body}
+          onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) submit(e); }} />
+        <button className="ops-button primary" type="submit" disabled={!canWrite || !body.trim()}>Run</button>
+      </form>
+      <p className="ops-muted">Enter runs, Shift+Enter adds a line. Jobs are signed by the server and verified by the agent before they run; output streams live and every run is proof-logged.</p>
+      {error && <p role="alert">{error}</p>}
+      {runs.map((r) => (
+        <article key={r.id} className="command-run" aria-label={`Run ${r.id}`}>
+          <header>
+            <code>{r.shell !== "default" ? `${r.shell}> ` : "$ "}{r.command.split("\n")[0]}{r.command.includes("\n") ? " …" : ""}</code>
+            <span className="command-meta">
+              <Status tone={tone(r)}>{label(r)}</Status>
+              {r.started_at && r.completed_at && <small>{((new Date(r.completed_at) - new Date(r.started_at)) / 1000).toFixed(1)}s</small>}
+              {canWrite && ["pending", "running"].includes(r.status) && <button className="ops-link" onClick={() => cancel(r.id)}>Cancel</button>}
+            </span>
+          </header>
+          <pre aria-live="polite">{r.output || (r.status === "pending" ? "Queued. A connected agent is notified instantly." : "")}</pre>
+        </article>
+      ))}
+    </section>
   );
 }
 

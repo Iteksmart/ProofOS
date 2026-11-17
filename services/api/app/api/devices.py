@@ -236,8 +236,28 @@ def delete_device(device_id: int, db: Session = Depends(get_db), user=Depends(ge
         {"org_id": dev.org_id, "device_id": dev.id},
         {"reason": "manual delete"},
     )
+    _detach_dependents(db, dev.id)
     db.delete(dev)
     db.commit()
+
+
+def _detach_dependents(db: Session, device_id: int) -> None:
+    """Unlink history that outlives the endpoint and remove its own operational rows.
+
+    PostgreSQL enforces these foreign keys; without this, any endpoint that ever raised
+    an alert or ran a command could not be deleted. The signed proof ledger keeps the record.
+    """
+    from app.models.models import Base
+
+    for table in reversed(Base.metadata.sorted_tables):
+        for fk in table.foreign_keys:
+            if fk.column.table.name != "devices" or table.name == "devices":
+                continue
+            column = table.c[fk.parent.name]
+            if fk.parent.nullable:
+                db.execute(table.update().where(column == device_id).values({fk.parent.name: None}))
+            else:
+                db.execute(table.delete().where(column == device_id))
 
 
 @router.post("/{device_id}/heartbeat")

@@ -96,6 +96,7 @@ def get_run(run_id: int, db: Session = Depends(get_db), user=Depends(get_current
         "output": r.output,
         "exit_code": r.exit_code,
         "created_at": r.created_at.isoformat() if r.created_at else None,
+        "started_at": r.started_at.isoformat() if r.started_at else None,
         "completed_at": r.completed_at.isoformat() if r.completed_at else None,
         "script_name": s.name if s else "",
     }
@@ -111,7 +112,9 @@ def complete_run(run_id: int, payload: RunComplete, db: Session = Depends(get_db
         if r.exit_code != payload.exit_code or r.output != (payload.output or "")[:20000]:
             raise HTTPException(status_code=409, detail="run already completed with a different result")
         return {"ok": True, "run_id": r.id}
-    r.status = "completed"
+    if r.status in {"cancelled", "expired"} and r.started_at is None:
+        raise HTTPException(status_code=409, detail=f"run {r.status}")
+    r.status = "cancelled" if r.status == "cancelling" else "completed"
     r.output = (payload.output or "")[:20000]
     r.exit_code = payload.exit_code
     r.completed_at = datetime.now(timezone.utc)
@@ -155,6 +158,30 @@ def complete_run(run_id: int, payload: RunComplete, db: Session = Depends(get_db
         emit(db, "patch.scan.completed", {"run_id": r.id, **scan_result}, agent_actor(r.device_id),
             {"org_id": r.org_id, "device_id": r.device_id}, {"reason": "agent-reported patch inventory"})
     return {"ok": True, "run_id": r.id}
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Stop a queued run before it starts, or ask the agent to kill a running one."""
+    if user.role not in {"admin", "manager"}:
+        raise HTTPException(status_code=403, detail="admin/manager only")
+    r = db.query(ScriptRun).filter(ScriptRun.id == run_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="run not found")
+    _scope(user, r.org_id)
+    if r.status == "pending":
+        r.status, r.completed_at = "cancelled", datetime.now(timezone.utc)
+    elif r.status == "running":
+        r.status = "cancelling"
+    else:
+        raise HTTPException(status_code=409, detail=f"run is already {r.status}")
+    db.commit()
+    from app.services.agent_jobs import hub
+
+    pushed = r.status == "cancelling" and hub.notify(r.device_id, {"type": "cancel", "run_id": r.id})
+    emit(db, "script.cancel.requested", {"run_id": r.id, "device_id": r.device_id, "status": r.status, "pushed": pushed},
+        actor_of(user), {"org_id": r.org_id, "device_id": r.device_id}, {"reason": "operator cancelled run"})
+    return {"run_id": r.id, "status": r.status, "pushed": pushed}
 
 
 @router.get("/runs/{run_id}/evidence")

@@ -39,7 +39,8 @@ npm run dev
 ## 5. Agent
 ```powershell
 cd D:\proofos\apps\agent
-python agent.py --api http://localhost:8000
+python agent.py --api http://localhost:8000 --device-id <id> --token <device_secret>
+# packaged build: python build.py  (see apps/agent/README.md)
 ```
 
 ## 6. How to add a feature

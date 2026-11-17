@@ -77,8 +77,10 @@ test("devices: register, search, open, run command", async ({ page }) => {
   await page.getByText("ui-ws-01").first().click();
   await expect(page.getByText("Device · ui-ws-01")).toBeVisible({ timeout: 10000 });
   await page.getByRole("tab", { name: "Operations", exact: true }).click();
-  await page.getByPlaceholder("e.g. df -h / ipconfig / show version").fill("echo hi");
-  await page.getByRole("button", { name: "Run" }).click();
+  const consoleBox = page.getByRole("region", { name: "Command console" });
+  await consoleBox.getByLabel("Command").fill("echo hi");
+  await consoleBox.getByRole("button", { name: "Run" }).click();
+  await expect(consoleBox.getByText("waiting for agent")).toBeVisible();
   expect(errors).toEqual([]);
 });
 
