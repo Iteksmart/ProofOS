@@ -18,6 +18,7 @@ from app.core.security import decode_token
 from app.api import reports, search
 from app.api import investigations
 from app.api import access, fleet, recovery, telemetry, topology
+from app.api import billing, customers, patching, thresholds
 
 settings = get_settings()
 logging.basicConfig(
@@ -69,16 +70,34 @@ async def _status_sync_loop() -> None:
             log.warning("status sync error: %s", e)
 
 
+async def _patch_policy_loop() -> None:
+    from app.core.db import SessionLocal
+    from app.services.patching import run_due_policies
+
+    while True:
+        await asyncio.sleep(300)
+        try:
+            db = SessionLocal()
+            try:
+                run_due_policies(db)
+            finally:
+                db.close()
+        except Exception as e:  # noqa: BLE001
+            log.warning("patch policy scheduler error: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.validate_production()
     init_db()
     broadcast = asyncio.create_task(_broadcast_loop())
     status_sync = asyncio.create_task(_status_sync_loop())
+    patch_scheduler = asyncio.create_task(_patch_policy_loop())
     log.info("ProofOS API ready env=%s db_ok=%s", settings.api_env, check_db())
     yield
     broadcast.cancel()
     status_sync.cancel()
+    patch_scheduler.cancel()
 
 
 from app.services.kill_switch import KillSwitchEngaged
@@ -252,6 +271,10 @@ app.include_router(access.router, prefix="/v1/access", tags=["privileged access"
 app.include_router(recovery.router, prefix="/v1/recovery", tags=["recovery"])
 app.include_router(topology.router, prefix="/v1/topology", tags=["topology"])
 app.include_router(fleet.router, prefix="/v1/fleet", tags=["fleet"])
+app.include_router(patching.router, prefix="/v1/patching", tags=["patching"])
+app.include_router(thresholds.router, prefix="/v1/thresholds", tags=["thresholds"])
+app.include_router(customers.router, prefix="/v1/customers", tags=["customers"])
+app.include_router(billing.router, prefix="/v1/billing", tags=["billing"])
 app.include_router(telemetry.router, prefix="/v1/telemetry", tags=["telemetry"])
 app.include_router(itechsmart.router, prefix="/v1/itechsmart", tags=["itechsmart"])
 app.include_router(mcp_registry.router, prefix="/v1/mcp", tags=["mcp"])

@@ -44,6 +44,8 @@ class Device(Base):
     last_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
     agent_version: Mapped[str] = mapped_column(String(50), default="")
     secret_hash: Mapped[str] = mapped_column(String(64), default="")
+    reboot_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -58,6 +60,7 @@ class Ticket(Base):
     severity: Mapped[str] = mapped_column(String(10), default="P3", index=True)  # P1..P4 (auto-classified)
     assignee: Mapped[str] = mapped_column(String(255), default="", index=True)
     device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id"), nullable=True, index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
     due_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
@@ -215,6 +218,7 @@ class Patch(Base):
     available_version: Mapped[str] = mapped_column(String(100), default="")
     severity: Mapped[str] = mapped_column(String(20), default="moderate", index=True)  # critical | important | moderate | low
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending | installed | failed | superseded
+    approval: Mapped[str] = mapped_column(String(20), default="unreviewed", index=True)  # unreviewed | approved | rejected | deferred
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
@@ -648,4 +652,96 @@ class RecoveryObservation(Base):
     policy_id: Mapped[int] = mapped_column(ForeignKey("recovery_policies.id"), index=True)
     payload: Mapped[str] = mapped_column(Text)
     proof_id: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PatchPolicy(Base):
+    """Automatic patch approval and deployment rules with a maintenance window."""
+
+    __tablename__ = "patch_policies"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_approve: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of severities
+    categories: Mapped[str] = mapped_column(Text, default="[]")  # JSON list; empty = all
+    device_types: Mapped[str] = mapped_column(Text, default="[]")  # JSON list; empty = all
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
+    window_days: Mapped[str] = mapped_column(Text, default="[0,1,2,3,4,5,6]")  # JSON list, Monday = 0 (UTC)
+    window_start_hour: Mapped[int] = mapped_column(Integer, default=22)
+    window_end_hour: Mapped[int] = mapped_column(Integer, default=4)
+    defer_days: Mapped[int] = mapped_column(Integer, default=0)
+    reboot: Mapped[str] = mapped_column(String(20), default="if_required")  # never | if_required | always
+    last_run_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AlertThreshold(Base):
+    """Raise an alert when a heartbeat metric stays past a limit for N samples."""
+
+    __tablename__ = "alert_thresholds"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    metric: Mapped[str] = mapped_column(String(10))  # cpu | mem | disk
+    limit: Mapped[float] = mapped_column(Float)
+    samples: Mapped[int] = mapped_column(Integer, default=3)
+    severity: Mapped[str] = mapped_column(String(20), default="warning")
+    device_type: Mapped[str] = mapped_column(String(30), default="")  # empty = all types
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Customer(Base):
+    """A client company served from this workspace (MSP model)."""
+
+    __tablename__ = "customers"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_customer_org_name"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    domain: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(50), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Contact(Base):
+    __tablename__ = "contacts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(50), default="")
+    role: Mapped[str] = mapped_column(String(100), default="")
+
+
+class Contract(Base):
+    """How a customer is billed: hourly, a monthly retainer with included hours, or a fixed fee."""
+
+    __tablename__ = "contracts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), default="hourly")  # hourly | retainer | fixed
+    hourly_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    monthly_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    included_hours: Mapped[float] = mapped_column(Float, default=0.0)
+    per_device_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Invoice(Base):
+    """An issued invoice. Lines and total are frozen and covered by a signed proof record."""
+
+    __tablename__ = "invoices"
+    __table_args__ = (UniqueConstraint("org_id", "customer_id", "period", name="uq_invoice_period"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("orgs.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    period: Mapped[str] = mapped_column(String(7))  # YYYY-MM
+    lines: Mapped[str] = mapped_column(Text, default="[]")
+    total: Mapped[float] = mapped_column(Float, default=0.0)
+    proof_id: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)

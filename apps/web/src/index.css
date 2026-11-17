@@ -690,3 +690,50 @@ p.telemetry-line { grid-template-columns: 78px 150px minmax(0, 1fr); padding: 6p
 .bulk-group select, .bulk-group input { height: 34px; padding: 0 10px; font-size: 12.5px; background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); color: var(--w); }
 .bulk-group input { width: 220px; }
 tr.row-selected td { background: var(--acc-soft); }
+
+/* ---- Patch policies, thresholds, customers, billing, ticket assistant ---- */
+.text-warn { color: var(--warn) !important; }
+.policy-editor { display: grid; gap: 14px; padding: 18px; margin-top: 12px; }
+.policy-editor h2 { margin: 0; }
+.policy-editor label, .inline-fields label, .policy-editor fieldset { display: grid; gap: 6px; font-size: 11.5px; color: var(--tx-dim); }
+.policy-editor legend { font-size: 11.5px; color: var(--tx-dim); margin-bottom: 6px; }
+.policy-editor small, .policy-editor fieldset small { color: var(--tx-faint); font-size: 11px; }
+.policy-editor input:not([type=checkbox]), .policy-editor select, .inline-fields input, .inline-fields select { height: 36px; padding: 0 10px; font-size: 13px; background: color-mix(in oklch, var(--w) 4%, transparent); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); color: var(--w); }
+.inline-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.inline-fields label { min-width: 130px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-toggle { padding: 5px 12px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line-strong); color: var(--tx); text-transform: capitalize; }
+.chip-toggle:hover { color: var(--w); border-color: var(--acc-line); }
+.chip-toggle.on { background: var(--acc-soft); border-color: var(--acc-line); color: var(--acc-text); }
+.switch-label { display: inline-flex !important; align-items: center; gap: 6px; font-size: 12px; color: var(--tx); }
+.policy-list { display: grid; gap: 2px; margin-top: 12px; }
+.policy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 12px 4px; border-top: 1px solid var(--line); }
+.policy-row:first-child { border-top: 0; }
+.policy-row strong { display: block; color: var(--w); font-size: 13.5px; }
+.policy-row small { display: block; color: var(--tx-dim); font-size: 11.5px; margin-top: 3px; }
+@media (max-width: 760px) { .policy-row { grid-template-columns: 1fr; } }
+.threshold-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.agent-install { display: grid; gap: 10px; }
+.agent-install pre { padding: 12px 14px; border-radius: var(--radius-ctl); background: var(--bg); border: 1px solid var(--line-strong); color: var(--tx-strong); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.customer-detail { display: grid; gap: 14px; padding: 20px; border-color: var(--acc-line); }
+.customer-name { font-size: 18px !important; text-transform: none !important; letter-spacing: -0.01em !important; color: var(--w) !important; margin: 2px 0 0 !important; }
+.customer-grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.contact-list { display: grid; gap: 6px; }
+.contact-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12.5px; }
+.contact-list strong { color: var(--w); font-weight: 600; }
+.contact-list small { color: var(--tx-dim); }
+.device-chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line-strong); font-size: 12px; color: var(--tx-strong); }
+.device-chip:hover { border-color: var(--acc-line); color: var(--w); }
+.device-chip i { width: 7px; height: 7px; border-radius: 999px; background: var(--tx-faint); }
+.device-chip i.online { background: var(--ok); }
+.device-chip i.offline { background: var(--bad); }
+.device-chip i.stale { background: var(--warn); }
+.billing-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+.billing-card { display: grid; gap: 10px; padding: 18px; }
+.billing-total { font-size: 22px; font-weight: 600; color: var(--w); font-variant-numeric: tabular-nums; }
+.billing-lines td { padding: 8px 4px; }
+.billing-lines td:not(:first-child) { text-align: right; white-space: nowrap; }
+.ticket-assist { margin: 6px 0 14px; padding: 14px 16px; border: 1px solid var(--acc-line); border-radius: var(--radius); background: linear-gradient(135deg, var(--acc-soft), transparent 60%); display: grid; gap: 10px; }
+.assist-body { display: grid; gap: 10px; font-size: 13px; color: var(--tx-strong); }
+.assist-body ol { padding-left: 20px; list-style: decimal; display: grid; gap: 4px; }
+.assist-reply pre { white-space: pre-wrap; font-family: var(--font-sans); font-size: 13px; padding: 10px 12px; margin: 6px 0 8px; border-radius: var(--radius-ctl); background: var(--surface-1); border: 1px solid var(--line-strong); }

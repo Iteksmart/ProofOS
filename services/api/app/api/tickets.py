@@ -52,6 +52,13 @@ def _scope(user, org_id: int) -> None:
         raise HTTPException(status_code=403, detail="org scope mismatch")
 
 
+def _validate_customer_scope(db: Session, org_id: int, customer_id: int | None) -> None:
+    from app.models.models import Customer
+
+    if customer_id is not None and not db.query(Customer).filter(Customer.id == customer_id, Customer.org_id == org_id).first():
+        raise HTTPException(status_code=404, detail="customer not found in organization")
+
+
 def _validate_device_scope(db: Session, org_id: int, device_id: int | None) -> None:
     """Prevent a ticket from being linked to a device in another tenant."""
     if device_id is None:
@@ -89,6 +96,11 @@ def get_ticket(tid: int, db: Session = Depends(get_db), user=Depends(get_current
 def create_ticket(payload: TicketCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     _scope(user, payload.org_id)
     _validate_device_scope(db, payload.org_id, payload.device_id)
+    _validate_customer_scope(db, payload.org_id, payload.customer_id)
+    customer_id = payload.customer_id
+    if customer_id is None and payload.device_id is not None:
+        device = db.query(Device).filter(Device.id == payload.device_id).first()
+        customer_id = device.customer_id if device else None
     t = Ticket(
         org_id=payload.org_id,
         title=payload.title,
@@ -96,6 +108,7 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db), user=Dep
         priority=payload.priority or "normal",
         severity=_severity(payload.priority or "normal", payload.title, payload.body or ""),
         device_id=payload.device_id,
+        customer_id=customer_id,
         due_at=_sla_due(payload.priority or "normal"),
     )
     db.add(t)
@@ -121,6 +134,8 @@ def update_ticket(tid: int, payload: TicketUpdate, db: Session = Depends(get_db)
     _scope(user, t.org_id)
     if "device_id" in payload.model_fields_set:
         _validate_device_scope(db, t.org_id, payload.device_id)
+    if "customer_id" in payload.model_fields_set:
+        _validate_customer_scope(db, t.org_id, payload.customer_id)
     if payload.status and payload.status != t.status:
         allowed = TRANSITIONS.get(t.status, set())
         if payload.status not in allowed:
@@ -143,6 +158,8 @@ def update_ticket(tid: int, payload: TicketUpdate, db: Session = Depends(get_db)
             setattr(t, field, val)
     if "device_id" in payload.model_fields_set:
         t.device_id = payload.device_id
+    if "customer_id" in payload.model_fields_set:
+        t.customer_id = payload.customer_id
     t.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(t)

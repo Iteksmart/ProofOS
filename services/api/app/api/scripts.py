@@ -116,20 +116,21 @@ def complete_run(run_id: int, payload: RunComplete, db: Session = Depends(get_db
     r.exit_code = payload.exit_code
     r.completed_at = datetime.now(timezone.utc)
     script = db.query(Script).filter(Script.id == r.script_id).first()
-    patch = None
+    patches = []
     if script and script.name.startswith("patch-deploy:"):
         try:
-            patch_id = int(script.name.removeprefix("patch-deploy:"))
+            patch_ids = [int(x) for x in script.name.removeprefix("patch-deploy:").split(",") if x]
         except ValueError:
-            patch_id = None
-        if patch_id:
-            patch = (
-                db.query(Patch)
-                .filter(Patch.id == patch_id, Patch.org_id == r.org_id, Patch.device_id == r.device_id)
-                .first()
-            )
-            if patch:
+            patch_ids = []
+        if patch_ids:
+            patches = db.query(Patch).filter(Patch.id.in_(patch_ids), Patch.org_id == r.org_id, Patch.device_id == r.device_id).all()
+            for patch in patches:
                 patch.status = "installed" if payload.exit_code == 0 else "failed"
+    scan_result = None
+    if script and script.name == "patch-scan" and payload.exit_code == 0:
+        from app.services import patch_scan
+
+        scan_result = patch_scan.apply(db, r.org_id, r.device_id, patch_scan.parse(r.output))
     db.flush()
     emit(
         db,
@@ -141,15 +142,18 @@ def complete_run(run_id: int, payload: RunComplete, db: Session = Depends(get_db
         {"org_id": r.org_id, "device_id": r.device_id},
         {"reason": "agent exec"},
     )
-    if patch:
+    if patches:
         emit(
             db,
             "patch.deployment.completed",
-            {"patch_id": patch.id, "run_id": r.id, "status": patch.status, "exit_code": r.exit_code},
+            {"patch_ids": [p.id for p in patches], "run_id": r.id, "status": patches[0].status, "exit_code": r.exit_code},
             agent_actor(r.device_id),
             {"org_id": r.org_id, "device_id": r.device_id},
             {"reason": "agent-reported patch result"},
         )
+    if scan_result is not None:
+        emit(db, "patch.scan.completed", {"run_id": r.id, **scan_result}, agent_actor(r.device_id),
+            {"org_id": r.org_id, "device_id": r.device_id}, {"reason": "agent-reported patch inventory"})
     return {"ok": True, "run_id": r.id}
 
 

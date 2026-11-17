@@ -31,3 +31,13 @@ def auth_client(client):
     data = r.json()
     client.headers.update({"Authorization": f"Bearer {data['access_token']}"})
     return client, data["org"]["id"], data["access_token"]
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiters():
+    """The limiters are process-wide; each test starts with a clean window."""
+    from app.core import security
+
+    for limiter in (security.login_limiter, security.password_reset_limiter):
+        limiter._hits.clear()
+    yield

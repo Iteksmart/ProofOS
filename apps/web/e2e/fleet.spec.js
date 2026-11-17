@@ -25,7 +25,7 @@ test("describe endpoints in plain English, then act on them in bulk", async ({ p
   await expect(understood).toContainText("Showing 2 endpoints where");
   await expect(understood).toContainText("OS: windows");
   await expect(understood).toContainText("Not understood: gizmos");
-  await expect(page.getByText("FLEET-WS-01")).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /FLEET-WS-01/ })).toHaveCount(0);
 
   await page.getByLabel("Select all shown endpoints").check();
   const bar = page.getByRole("region", { name: "Bulk actions" });
@@ -38,6 +38,6 @@ test("describe endpoints in plain English, then act on them in bulk", async ({ p
   expect(tickets.map((t) => t.title).sort()).toEqual(["FLEET-SRV-01: Apply baseline hardening", "FLEET-SRV-02: Apply baseline hardening"]);
 
   await page.getByRole("button", { name: "Clear", exact: true }).click();
-  await expect(page.getByText("FLEET-WS-01")).toBeVisible();
+  await expect(page.getByRole("row", { name: /FLEET-WS-01/ })).toBeVisible();
   expect(errors).toEqual([]);
 });

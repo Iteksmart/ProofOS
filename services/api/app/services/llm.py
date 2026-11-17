@@ -71,12 +71,14 @@ class OpenAICompatClient:
         h.update(self.extra_headers)
         return h
 
-    def chat(self, messages: list[dict], model: str | None = None) -> str:
+    def chat(self, messages: list[dict], model: str | None = None, max_tokens: int | None = None) -> str:
         """Send a chat request and return the assistant's text. Raises on failure."""
         payload = {
             "model": model or self.model,
             "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *messages],
         }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
         with httpx.Client(transport=self._transport, timeout=self.timeout) as client:
             r = client.post(f"{self.base_url}/chat/completions", headers=self._headers(), json=payload)
             r.raise_for_status()

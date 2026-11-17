@@ -9,19 +9,14 @@ from app.core.security import actor_of, get_current_user
 from app.models.models import Device, Patch, Script, ScriptRun
 from app.schemas.schemas import PatchCreate, PatchOut
 from app.services.execution import queue_command
-from app.services import kill_switch
+from app.services import kill_switch, patching
 
 router = APIRouter()
 
 SCAN_CMD = {
-    "windows": 'powershell -Command "winget upgrade --accept-source-agreements | Out-String"',
+    "windows": patching.encoded_powershell(patching.WINDOWS_UPDATE_SCAN),
     "linux": "apt list --upgradable 2>/dev/null || yum check-update 2>/dev/null || true",
 }
-DEPLOY_CMD = {
-    "windows": 'powershell -Command "winget upgrade --all --silent --accept-source-agreements --accept-package-agreements"',
-    "linux": "sudo apt-get update -y && sudo apt-get upgrade -y 2>/dev/null || sudo yum update -y",
-}
-
 
 def _scope(user, org_id: int) -> None:
     if user.org_id != org_id:
@@ -70,10 +65,14 @@ def deploy_patch(pid: int, db: Session = Depends(get_db), user=Depends(get_curre
     _require_admin(user)
     kill_switch.require_disengaged(db)
     dev = db.query(Device).filter(Device.id == p.device_id).first()
-    os_key = "windows" if (dev.os or "").lower().startswith("windows") else "linux"
-    cmd = DEPLOY_CMD[os_key]
     if p.status == "deploying":
         raise HTTPException(status_code=409, detail="patch deployment is already in progress")
+    if p.approval == "rejected":
+        raise HTTPException(status_code=409, detail="this patch was rejected; reset its approval before deploying")
+    try:
+        cmd = patching.deploy_command(dev, "never", [p])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="this patch has no exact package id or KB number to install; rescan the endpoint") from exc
     # Keep the patch-to-run relationship explicit in the script name.  The agent
     # completion handler uses it to mark the patch installed or failed; queued
     # work must never be presented as an installed patch.
@@ -98,6 +97,14 @@ def scan_device(device_id: int, org_id: int, db: Session = Depends(get_db), user
     if not dev:
         raise HTTPException(status_code=404, detail="device not found")
     os_key = "windows" if (dev.os or "").lower().startswith("windows") else "linux"
-    run = queue_command(db, org_id, device_id, SCAN_CMD[os_key], actor_of(user))
+    kill_switch.require_disengaged(db)
+    # The script name marks the run so the agent's result is parsed into patch records.
+    script = Script(org_id=org_id, name="patch-scan", body=SCAN_CMD[os_key], version="1.0.0")
+    db.add(script)
+    db.flush()
+    run = ScriptRun(org_id=org_id, device_id=device_id, script_id=script.id, status="pending")
+    db.add(run)
+    db.commit()
+    db.refresh(run)
     emit(db, "patch.scan", {"device_id": device_id, "run_id": run.id}, actor_of(user), {"org_id": org_id, "device_id": device_id}, {"reason": "patch scan"})
     return {"device_id": device_id, "run_id": run.id, "command": SCAN_CMD[os_key]}

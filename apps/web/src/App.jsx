@@ -4,6 +4,8 @@ import { DeviceActivity, InventoryDetail, InventoryPage, IntegrationsPage, Repor
 import CommandMenu from "./CommandMenu";
 import InvestigationPanel from "./InvestigationPanel";
 import { AccessPage, RecoveryPanel, TelemetryPage, TopologyPage } from "./Evidence";
+import { AgentInstall, NetworkDiscovery, PatchCenter, ThresholdsPanel } from "./Rmm";
+import { BillingPage, CustomersPage, TicketAssist } from "./Psa";
 
 // Production nginx proxies /v1 to the API, so an empty build value keeps all
 // browser traffic on the current origin. Local Vite dev keeps localhost:8000.
@@ -131,6 +133,8 @@ const ICONS = {
   time: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 7v5l3 2",
   onboarding: "M5 21V4 M5 4h12l-2 4 2 4H5",
   consulting: "M3 8h18v12H3z M9 8V5h6v3 M3 13h18",
+  customers: "M4 21V7l8-4 8 4v14 M9 21v-5h6v5 M8 10h2 M14 10h2 M8 13h2 M14 13h2",
+  billing: "M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z M9 8h6 M9 12h6 M9 16h3",
   ai: "M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z M18 15v5 M15.5 17.5h5",
   admin: "M4 7h10 M18 7h2 M14 5v4 M4 17h4 M12 17h8 M8 15v4",
   itechsmart: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
@@ -204,14 +208,14 @@ export default function App() {
   const [fleetQuery, setFleetQuery] = useState(null);
   const [fleetBusy, setFleetBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [bulk, setBulk] = useState({ script_id: "", title: "", priority: "normal" });
+  const [bulk, setBulk] = useState({ script_id: "", title: "", priority: "normal", package: "" });
   const [bulkResult, setBulkResult] = useState(null);
   const [verifyResult, setVerifyResult] = useState("");
   const [aiQuery, setAiQuery] = useState("Summarise offline devices");
   const [aiResult, setAiResult] = useState("");
-  const [newTicket, setNewTicket] = useState({ title: "", body: "", priority: "normal", device_id: "" });
+  const [newTicket, setNewTicket] = useState({ title: "", body: "", priority: "normal", device_id: "", customer_id: "" });
   const [newScript, setNewScript] = useState({ name: "", body: "echo ok", version: "1.0.0" });
-  const [newDevice, setNewDevice] = useState({ hostname: "", os: "", ip: "", device_type: "workstation" });
+  const [newDevice, setNewDevice] = useState({ hostname: "", os: "", ip: "", device_type: "workstation", customer_id: "" });
   const [enrolled, setEnrolled] = useState(null);
   const [newAutomation, setNewAutomation] = useState({ name: "", trigger: "ticket.opened", action: "notify", condition: "", remediation_script_id: "" });
   const [newCheck, setNewCheck] = useState({ device_id: "", kind: "port", target: "", threshold_ms: "" });
@@ -277,6 +281,7 @@ export default function App() {
   const [newVm, setNewVm] = useState({ name: "", host_id: "", hypervisor: "hyper-v", vcpu: "", memory_mb: "" });
   const [remoteSession, setRemoteSession] = useState(null);
   const [patches, setPatches] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [newPatch, setNewPatch] = useState({ name: "", device_id: "", category: "security", severity: "moderate", available_version: "" });
   const [apmSummary, setApmSummary] = useState(null);
   const [pushTokens, setPushTokens] = useState([]);
@@ -712,6 +717,7 @@ export default function App() {
       setApmSummary(apm);
     } catch { setAnomalies([]); setApmSummary(null); }
   }
+  async function loadCustomers() { try { setCustomers(await api("/v1/customers")); } catch { setCustomers([]); } }
   async function loadPatches() { try { setPatches(await api(`/v1/patches?org_id=${orgId}`)); } catch { setPatches([]); } }
   async function loadPush() { try { setPushTokens(await api(`/v1/push?org_id=${orgId}`)); } catch { setPushTokens([]); } }
   async function loadEnclaves() {
@@ -747,6 +753,7 @@ export default function App() {
     if (view === "itechsmart") loadIts();
     if (view === "vms") loadVms();
     if (view === "patches" || view === "devices") loadPatches();
+    if (["devices", "tickets", "patches", "customers"].includes(view)) loadCustomers();
     if (view === "admin") loadPush();
     if (view === "enclaves") loadEnclaves();
   }, [view]);
@@ -861,7 +868,7 @@ export default function App() {
     ["dash", "Overview"], ["analytics", "Analytics"], ["devices", "Devices"], ["tickets", "Tickets"],
     ["monitor", "Monitor"], ["scripts", "Scripts"], ["automations", "Automations"],
     ["proof", "Proof"], ["ai", "AI Copilot"], ["admin", "Admin"],
-    ["cmdb", "CMDB"], ["knowledge", "Knowledge"], ["vault", "Vault"], ["changes", "Changes"], ["time", "Time"],
+    ["cmdb", "CMDB"], ["customers", "Customers"], ["billing", "Billing"], ["knowledge", "Knowledge"], ["vault", "Vault"], ["changes", "Changes"], ["time", "Time"],
     ["vms", "VMs"], ["patches", "Patches"], ["enclaves", "Workspaces"], ["itechsmart", "iTechSmart"],
     ["audit", "Audit"], ["onboarding", "Onboarding"], ["consulting", "Consulting"],
     ["inventory", "Inventory"], ["integrations", "Integrations"], ["reports", "Reports"],
@@ -871,7 +878,7 @@ export default function App() {
     { label: "Workspace", ids: ["dash", "reports", "analytics"] },
     { label: "Operations", ids: ["devices", "inventory", "monitor", "topology", "telemetry", "tickets", "scripts", "automations", "vms", "patches"] },
     { label: "Governance", ids: ["proof", "audit", "access", "changes", "vault", "enclaves"] },
-    { label: "Service delivery", ids: ["knowledge", "cmdb", "time", "onboarding", "consulting"] },
+    { label: "Service delivery", ids: ["customers", "billing", "knowledge", "cmdb", "time", "onboarding", "consulting"] },
     { label: "Platform", ids: ["ai", "integrations", "admin", "itechsmart"] },
   ].map((group) => ({ ...group, items: group.ids.map((id) => nav.find(([key]) => key === id)).filter(Boolean) }));
   const emptyWorkspace = devices.length === 0 && tickets.length === 0;
@@ -944,12 +951,14 @@ export default function App() {
             <select aria-label="Navigate workspace" value={view} onChange={(e) => setView(e.target.value)}>{navGroups.map((g) => <optgroup key={g.label} label={g.label}>{g.items.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</optgroup>)}</select><button className="ops-button" onClick={() => setCommandOpen(true)}><Icon name="search" />Search</button>
           </nav>
           <main id="workspace-main" className={`workspace-main p-4 md:p-6 grid gap-6 view-${view}`}>
-        {!["dash", "inventory", "integrations", "reports", "topology", "telemetry", "access"].includes(view) && <div className="workspace-page-title"><div><p className="ops-eyebrow">{activeGroup}</p><h1>{activeLabel === "Devices" ? "Your endpoint workspace" : activeLabel}</h1><p>{pageDescriptions[view] || `Manage ${activeLabel.toLowerCase()} across your operations workspace.`}</p></div>{view === "devices" && <button className="ops-button" onClick={() => setView("inventory")}>Explore inventory <span aria-hidden="true">↗</span></button>}</div>}
+        {!["dash", "inventory", "integrations", "reports", "topology", "telemetry", "access", "customers", "billing"].includes(view) && <div className="workspace-page-title"><div><p className="ops-eyebrow">{activeGroup}</p><h1>{activeLabel === "Devices" ? "Your endpoint workspace" : activeLabel}</h1><p>{pageDescriptions[view] || `Manage ${activeLabel.toLowerCase()} across your operations workspace.`}</p></div>{view === "devices" && <button className="ops-button" onClick={() => setView("inventory")}>Explore inventory <span aria-hidden="true">↗</span></button>}</div>}
         {view === "inventory" && <InventoryPage api={api} orgId={orgId} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
         {view === "integrations" && <IntegrationsPage api={api} orgId={orgId} apiBase={API} />}
         {view === "reports" && <ReportsPage api={api} orgId={orgId} apiBase={API} onNavigate={setView} />}
         {view === "topology" && <TopologyPage api={api} devices={devices} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} />}
         {view === "telemetry" && <TelemetryPage api={api} onNavigate={setView} />}
+        {view === "customers" && <CustomersPage api={api} devices={devices} canWrite={canWrite} onOpenDevice={(id) => { setView("devices"); openDevice(id); }} onChanged={() => { load(); loadCustomers(); }} />}
+        {view === "billing" && <BillingPage api={api} apiBase={API} canWrite={canWrite} />}
         {view === "access" && <AccessPage api={api} orgId={orgId} devices={devices} users={users} claims={claims} />}
         {view === "dash" && (
           <>
@@ -1139,18 +1148,18 @@ export default function App() {
               <select className="bg-slate-900 border border-slate-800 rounded px-2 py-2 text-sm" value={newDevice.device_type} onChange={(e) => setNewDevice({ ...newDevice, device_type: e.target.value })}>
                 {["workstation", "server", "access_point", "gateway", "switch", "node"].map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
               </select>
+              {customers.length > 0 && <select className="bg-slate-900 border border-slate-800 rounded px-2 py-2 text-sm" aria-label="Customer" value={newDevice.customer_id} onChange={(e) => setNewDevice({ ...newDevice, customer_id: e.target.value })}><option value="">No customer</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
               <button className="bg-violet-600 px-3 py-2 rounded text-sm" onClick={async () => {
-                const j = await api(`/v1/devices`, { method: "POST", body: JSON.stringify({ org_id: orgId, ...newDevice }) });
-                setNewDevice({ hostname: "", os: "", ip: "", device_type: "workstation" });
+                const j = await api(`/v1/devices`, { method: "POST", body: JSON.stringify({ org_id: orgId, ...newDevice, customer_id: newDevice.customer_id ? Number(newDevice.customer_id) : null }) });
+                setNewDevice({ hostname: "", os: "", ip: "", device_type: "workstation", customer_id: "" });
                 setEnrolled(j);
                 load();
               }}>Register</button>
             </div></details>
             {enrolled && (
               <Panel title={`Device enrolled · ${enrolled.hostname}`} onClose={() => setEnrolled(null)}>
-                <p className="text-sm text-slate-300 mb-2">Install the agent with this one-time secret (copy it now):</p>
-                <pre className="text-xs bg-slate-950 border border-slate-800 rounded p-3 overflow-auto mb-2">{`python agent.py --api ${API || window.location.origin} --device-id ${enrolled.id} --token ${enrolled.device_secret}`}</pre>
-                <p className="text-xs text-slate-500">The secret is shown once; rotate it anytime from the device detail.</p>
+                <p className="text-sm text-slate-300 mb-2">Run this on the endpoint to install the agent. It contains a one-time secret, so copy it now.</p>
+                <AgentInstall apiBase={API} device={enrolled} />
               </Panel>
             )}
             {selDevice && (
@@ -1167,6 +1176,8 @@ export default function App() {
                   <div><span>Last seen</span><strong>{selDevice.last_seen ? new Date(selDevice.last_seen).toLocaleString() : "Never"}</strong></div>
                   <div><span>Pending patches</span><strong>{patchesByDevice[selDevice.id] ? `${patchesByDevice[selDevice.id].pending}${patchesByDevice[selDevice.id].critical ? ` (${patchesByDevice[selDevice.id].critical} critical)` : ""}` : "None reported"}</strong></div>
                   <div><span>Agent</span><strong>{selDevice.agent_version || "Not installed"}</strong></div>
+                  <div><span>Reboot</span><strong className={selDevice.reboot_required ? "text-warn" : ""}>{selDevice.reboot_required ? "Required" : "Not required"}</strong></div>
+                  <div><span>Customer</span><strong>{customers.find((c) => c.id === selDevice.customer_id)?.name || "Unassigned"}</strong></div>
                   {alertsByDevice[selDevice.id] && <button className="ops-button" onClick={() => setView("monitor")}>Review alerts</button>}
                 </div>
                 <div className="flex flex-wrap gap-1 border-b border-slate-800 mb-3" role="tablist" aria-label="Device sections">
@@ -1250,14 +1261,21 @@ export default function App() {
                   try { setBulkResult(await api("/v1/fleet/bulk", { method: "POST", body: JSON.stringify({ device_ids: [...selectedIds], action: "create_ticket", title: bulk.title.trim(), priority: bulk.priority }) })); setBulk({ ...bulk, title: "" }); load(); } catch (e) { setErr(e.message); }
                 }}>Create tickets</button>
               </span>
+              {canWrite && <span className="bulk-group">
+                <input aria-label="Software package id" placeholder="Package id, e.g. Mozilla.Firefox" value={bulk.package} onChange={(e) => setBulk({ ...bulk, package: e.target.value.trim() })} />
+                {[["install_software", "Install"], ["uninstall_software", "Uninstall"]].map(([action, label]) => <button key={action} className="ops-button" disabled={!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(bulk.package)} onClick={async () => {
+                  if (!window.confirm(`${label} ${bulk.package} on ${selectedIds.size} endpoint${selectedIds.size === 1 ? "" : "s"}?`)) return;
+                  try { setBulkResult(await api("/v1/fleet/bulk", { method: "POST", body: JSON.stringify({ device_ids: [...selectedIds], action, package: bulk.package }) })); } catch (e) { setErr(e.message); }
+                }}>{label}</button>)}
+              </span>}
               <button className="ops-link" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
             </div>}
-            {bulkResult && <div className="ops-note" role="status"><strong>{bulkResult.action === "run_script" ? "Script queued" : "Tickets created"}: {bulkResult.succeeded} of {bulkResult.requested} endpoints.</strong>{bulkResult.failed > 0 && ` ${bulkResult.failed} failed: ${bulkResult.results.filter((r) => !r.ok).map((r) => `#${r.device_id} ${r.error}`).join("; ")}.`} Recorded as signed proof {bulkResult.proof_id.slice(0, 10)}…. <button className="ops-link" onClick={() => setBulkResult(null)}>Dismiss</button></div>}
+            {bulkResult && <div className="ops-note" role="status"><strong>{bulkResult.action === "run_script" ? "Script queued" : bulkResult.action === "create_ticket" ? "Tickets created" : bulkResult.action === "install_software" ? "Install queued" : "Uninstall queued"}: {bulkResult.succeeded} of {bulkResult.requested} endpoints.</strong>{bulkResult.failed > 0 && ` ${bulkResult.failed} failed: ${bulkResult.results.filter((r) => !r.ok).map((r) => `#${r.device_id} ${r.error}`).join("; ")}.`} Recorded as signed proof {bulkResult.proof_id.slice(0, 10)}…. <button className="ops-link" onClick={() => setBulkResult(null)}>Dismiss</button></div>}
             <Table head={[<input key="all" type="checkbox" aria-label="Select all shown endpoints" checked={filteredDevices.length > 0 && filteredDevices.every((d) => selectedIds.has(d.id))} onChange={(e) => setSelectedIds(e.target.checked ? new Set(filteredDevices.map((d) => d.id)) : new Set())} />, "Hostname", "Type", "OS / IP", "Status", "Open alerts", "Pending patches", "CPU", "Disk", "Mem"]}>
               {filteredDevices.map((d) => (
                 <tr key={d.id} className={`cursor-pointer hover:bg-slate-800/50 ${selectedIds.has(d.id) ? "row-selected" : ""}`} onClick={() => openDevice(d.id)}>
                   <td className="pl-4 py-3 w-8" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${d.hostname}`} checked={selectedIds.has(d.id)} onChange={(e) => { const next = new Set(selectedIds); if (e.target.checked) next.add(d.id); else next.delete(d.id); setSelectedIds(next); }} /></td>
-                  <td className="px-4 py-3"><button className="device-hostname" onClick={(e) => { e.stopPropagation(); openDevice(d.id); }}><span className="device-avatar"><Icon name="devices" /></span><span>{d.hostname}<small>Endpoint #{d.id}</small></span></button></td>
+                  <td className="px-4 py-3"><button className="device-hostname" onClick={(e) => { e.stopPropagation(); openDevice(d.id); }}><span className="device-avatar"><Icon name="devices" /></span><span>{d.hostname}<small>{customers.find((c) => c.id === d.customer_id)?.name || `Endpoint #${d.id}`}{d.reboot_required ? " · reboot required" : ""}</small></span></button></td>
                   <td className="px-4 py-3 text-xs text-slate-400">{(d.device_type || "workstation").replace("_", " ")}</td>
                   <td className="px-4 py-3 text-slate-400">{d.os} · {d.ip}</td>
                   <td className="px-4 py-3"><HealthPill status={d.status} /></td>
@@ -1270,6 +1288,7 @@ export default function App() {
               ))}
             </Table>
             {filteredDevices.length === 0 && <div className="ops-empty"><span className="ops-empty-symbol" aria-hidden="true">▣</span><h3>{devices.length ? "No endpoints match your filters" : "Bring your first endpoint into focus"}</h3><p>{devices.length ? "Try another hostname, device type, or status filter." : "Register an endpoint above, then run the agent to see live health, installed software, and operational history."}</p></div>}
+            <NetworkDiscovery api={api} devices={devices} canWrite={canWrite} onRegister={(r) => { setNewDevice({ ...newDevice, hostname: `device-${r.ip.replaceAll(".", "-")}`, ip: r.ip }); document.querySelector(".device-enrollment")?.setAttribute("open", ""); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
           </>
         )}
 
@@ -1282,11 +1301,12 @@ export default function App() {
                 <option value="">No linked device</option>
                 {devices.map((d) => <option key={d.id} value={d.id}>{d.hostname} · {d.status}</option>)}
               </select>
+              {customers.length > 0 && <select className="bg-slate-900 border border-slate-800 rounded px-2 py-2 text-sm" aria-label="Ticket customer" value={newTicket.customer_id} onChange={(e) => setNewTicket({ ...newTicket, customer_id: e.target.value })}><option value="">Customer from device</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
               <div className="flex gap-2">
                 <select className="bg-slate-900 border border-slate-800 rounded px-2 py-2 text-sm" value={newTicket.priority} onChange={(e) => setNewTicket({ ...newTicket, priority: e.target.value })}>
                   <option value="low">low</option><option value="normal">normal</option><option value="high">high</option><option value="urgent">urgent</option>
                 </select>
-                <button className="bg-violet-600 px-3 py-2 rounded text-sm" onClick={async () => { await api(`/v1/tickets`, { method: "POST", body: JSON.stringify({ org_id: orgId, ...newTicket, device_id: newTicket.device_id ? Number(newTicket.device_id) : null }) }); setNewTicket({ title: "", body: "", priority: "normal", device_id: "" }); load(); }}>Create ticket</button>
+                <button className="bg-violet-600 px-3 py-2 rounded text-sm" onClick={async () => { await api(`/v1/tickets`, { method: "POST", body: JSON.stringify({ org_id: orgId, ...newTicket, device_id: newTicket.device_id ? Number(newTicket.device_id) : null, customer_id: newTicket.customer_id ? Number(newTicket.customer_id) : null }) }); setNewTicket({ title: "", body: "", priority: "normal", device_id: "" }); load(); }}>Create ticket</button>
               </div>
             </div>
             {selTicket && (
@@ -1312,8 +1332,15 @@ export default function App() {
                       {devices.map((d) => <option key={d.id} value={d.id}>{d.hostname}</option>)}
                     </select>
                   </Field>
+                  {customers.length > 0 && <Field label="Customer">
+                    <select className={inputCls} value={selTicket.customer_id || ""} onChange={(e) => updateTicket({ customer_id: e.target.value ? Number(e.target.value) : null })}>
+                      <option value="">No customer</option>
+                      {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </Field>}
                   <div><span className="text-slate-500">SLA due</span><div className="text-sm">{isBreached(selTicket) ? <span className="text-red-400">breached · {selTicket.due_at}</span> : (selTicket.due_at || "—")}</div></div>
                 </div>
+                <TicketAssist api={api} ticketId={selTicket.id} onUseReply={(text) => setCommentText(text)} />
                 <div className="mb-3">
                   <h3 className="text-xs text-slate-400 mb-1">Comments</h3>
                   <div className="space-y-2 max-h-48 overflow-auto">
@@ -1358,6 +1385,7 @@ export default function App() {
 
         {view === "monitor" && (
           <>
+            <ThresholdsPanel api={api} canWrite={canWrite} />
             <div className="flex flex-wrap gap-2 items-end">
               <Field label="Device">
                 <select className={inputCls} value={newCheck.device_id} onChange={(e) => setNewCheck({ ...newCheck, device_id: e.target.value })}>
@@ -1985,6 +2013,8 @@ export default function App() {
         )}
         {view === "patches" && (
           <>
+            <PatchCenter api={api} devices={devices} customers={customers} canWrite={canWrite} patches={patches} onChanged={loadPatches} />
+            <h3 className="ops-section-title">Register a patch manually</h3>
             <div className="grid md:grid-cols-5 gap-2">
               <input className={inputCls} placeholder="name e.g. openssl" value={newPatch.name} onChange={(e) => setNewPatch({ ...newPatch, name: e.target.value })} />
               <select className={inputCls} value={newPatch.device_id} onChange={(e) => setNewPatch({ ...newPatch, device_id: e.target.value })}>
@@ -2003,19 +2033,6 @@ export default function App() {
                 loadPatches();
               }}>Register patch</button>
             </div>
-            <Table head={["ID", "Name", "Category", "Severity", "Status", "Device", "Actions"]}>
-              {patches.map((p) => (
-                <tr key={p.id}>
-                  <td className="px-4 py-3 text-slate-500">#{p.id}</td>
-                  <td className="px-4 py-3">{p.name}</td>
-                  <td className="px-4 py-3">{p.category}</td>
-                  <td className="px-4 py-3"><HealthPill status={p.severity} /></td>
-                  <td className="px-4 py-3">{p.status}</td>
-                  <td className="px-4 py-3">{p.device_id}</td>
-                  <td className="px-4 py-3">{["pending", "failed"].includes(p.status) ? <button className="text-violet-400 text-xs hover:underline" onClick={async () => { const deployment = await api(`/v1/patches/${p.id}/deploy`, { method: "POST", body: "{}" }); setErr(`Patch deployment queued as run #${deployment.run_id}; status updates when the agent reports completion.`); loadPatches(); }}>Deploy</button> : <span className="text-xs text-slate-500">{p.status === "deploying" ? "Awaiting agent" : "Complete"}</span>}</td>
-                </tr>
-              ))}
-            </Table>
           </>
         )}
             {view === "enclaves" && (

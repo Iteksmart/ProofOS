@@ -136,6 +136,11 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db), user=Dep
     org = db.query(Org).filter(Org.id == payload.org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="org not found")
+    if payload.customer_id is not None:
+        from app.models.models import Customer
+
+        if not db.query(Customer).filter(Customer.id == payload.customer_id, Customer.org_id == payload.org_id).first():
+            raise HTTPException(status_code=404, detail="customer not found in organization")
     secret = _secrets.token_urlsafe(24)
     dev = Device(
         org_id=payload.org_id,
@@ -143,6 +148,7 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db), user=Dep
         os=payload.os,
         ip=payload.ip,
         device_type=payload.device_type,
+        customer_id=payload.customer_id,
         secret_hash=hashlib.sha256(secret.encode()).hexdigest(),
     )
     db.add(dev)
@@ -248,10 +254,15 @@ def heartbeat(device_id: int, payload: DeviceHeartbeat, db: Session = Depends(ge
     dev.status = payload.status
     if payload.agent_version:
         dev.agent_version = payload.agent_version
+    if payload.reboot_required is not None:
+        dev.reboot_required = payload.reboot_required
     dev.last_seen = datetime.now(timezone.utc)
     db.add(DeviceMetric(org_id=dev.org_id, device_id=dev.id, cpu=dev.cpu, disk=dev.disk, mem=dev.mem))
     db.commit()
     db.refresh(dev)
+    from app.services.thresholds import evaluate as evaluate_thresholds
+
+    evaluate_thresholds(db, dev)
     publish({"type": "device", "device_id": dev.id, "hostname": dev.hostname, "status": dev.status, "org_id": dev.org_id})
     return {"ok": True, "device_id": dev.id, "status": dev.status}
 

@@ -16,7 +16,8 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "python -m uvicorn app.main:app --host 127.0.0.1 --port 8018",
+      // Reset the database before the server opens it; a later delete fails on Windows while the file is in use.
+      command: "python -c \"import os; [os.remove(f) for f in ('e2e.db', 'e2e.db-journal') if os.path.exists(f)]\" && python -m uvicorn app.main:app --host 127.0.0.1 --port 8018",
       cwd: fileURLToPath(new URL("../../services/api", import.meta.url)),
       url: "http://127.0.0.1:8018/health",
       env: {

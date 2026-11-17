@@ -171,7 +171,7 @@ def test_search_software_and_device_activity_are_scoped(auth_client):
 def test_patch_status_waits_for_agent_result(auth_client):
     client, org_id, _ = auth_client
     device = client.post("/v1/devices", json={"org_id": org_id, "hostname": "patch-result", "os": "Linux"}).json()
-    patch = client.post("/v1/patches", json={"org_id": org_id, "device_id": device["id"], "name": "OS update"}).json()
+    patch = client.post("/v1/patches", json={"org_id": org_id, "device_id": device["id"], "name": "openssl"}).json()
     run = client.post(f"/v1/patches/{patch['id']}/deploy").json()
     assert run["status"] == "deploying"
     assert client.post(f"/v1/patches/{patch['id']}/deploy").status_code == 409

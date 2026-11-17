@@ -12,19 +12,60 @@ MSPs, ServiceNow is an ITSM/ITOM workflow platform, and Dynatrace and Datadog
 are observability platforms. A single blended score would hide that, so read
 the rows that match the job you need done.
 
-| Capability | ProofOS | Atera | ServiceNow | Dynatrace | Datadog |
+| Capability | ProofOS (before → now) | Atera | ServiceNow | Dynatrace | Datadog |
 | --- | :-: | :-: | :-: | :-: | :-: |
-| Endpoint management (agent, inventory, status, scripts, remote) | 7 | 9 | 5 | 3 | 4 |
-| Patch management | 5 | 9 | 5 | 2 | 2 |
-| Ticketing, ITSM and PSA | 6 | 8 | 10 | 2 | 4 |
+| Endpoint management (agent, inventory, alerts, scripts, software, discovery, remote) | 7 → **8** | 9 | 5 | 3 | 4 |
+| Patch management | 5 → **8** | 9 | 5 | 2 | 2 |
+| Ticketing, ITSM and PSA (customers, contracts, billing) | 6 → **7** | 8 | 10 | 2 | 4 |
 | Logs, metrics and traces | 5 | 3 | 6 | 10 | 10 |
 | Service topology and impact | 5 | 2 | 9 | 10 | 8 |
-| AI troubleshooting | 6 | 7 | 8 | 9 | 9 |
+| AI troubleshooting | 6 → **7** | 7 | 8 | 9 | 9 |
 | AI remediation with approval and recovery checks | 7 | 6 | 8 | 7 | 7 |
 | Verifiable evidence of actions (signatures, hash chain) | 9 | 3 | 5 | 4 | 4 |
 | Privileged access (just-in-time, dual control, vault) | 6 | 5 | 5 | 2 | 3 |
 | Usability of the console | 7 | 8 | 6 | 7 | 8 |
 | Scale, maturity, certifications, ecosystem | 2 | 8 | 10 | 10 | 10 |
+
+### What changed against Atera in the 17 November round
+
+- **Patch management (5 → 8).** Scans now produce patch records: Windows
+  Update KBs (with Microsoft severity) and winget apps on Windows, apt and
+  dnf/yum on Linux. Policies auto-approve by severity and category, deploy
+  inside UTC maintenance windows, defer new patches, and reboot never, always
+  or only when the OS requires it. A scheduler runs open windows once each.
+  Deployments install exactly the approved KBs and package ids, so rejected
+  patches are never installed by a blanket upgrade. Compliance shows the share
+  of fully patched endpoints, critical backlog, approvals pending and reboots
+  pending. Every approval, run and result is signed.
+- **Endpoint management (7 → 8).** Threshold alerts on CPU, memory and disk
+  open after N consecutive samples and resolve themselves; agents report pending
+  reboots; one-line install commands for Windows, Linux and macOS; bulk software
+  install and uninstall through winget, apt/dnf and brew with strict package-id
+  validation; passive network discovery from an agent's neighbour table that
+  flags unmanaged devices.
+- **PSA (6 → 7).** Customers with contacts, assigned endpoints and tickets
+  (tickets inherit the endpoint's customer); hourly, retainer and fixed
+  contracts with per-endpoint fees; a monthly billing preview from billable
+  ticket time; issued invoices that are frozen, signed, exported to CSV, and
+  flagged if altered later.
+- **AI troubleshooting (6 → 7).** A ticket assistant summarises the ticket,
+  conversation, linked device, open alerts, pending patches and matching
+  knowledge articles, suggests next steps and drafts a reply that can be posted
+  as a comment. It runs on the configured AI provider (verified against the
+  iTechSmart Nemotron bridge) and falls back to a rule-based answer that is
+  labelled as such.
+
+### Still behind Atera, and what closes each gap
+
+| Area | Gap | Next step |
+| --- | --- | --- |
+| Endpoint management | The agent needs Python; Atera ships signed MSI and pkg installers | Package the agent as a signed Windows service and macOS pkg |
+| Endpoint management | Discovery is passive (neighbour table only); no SNMP or port scanning | Agent-side subnet sweep with SNMP sysDescr, then topology linking |
+| Endpoint management | No Windows service or event-log monitoring | Add service-state and event-ID checks to thresholds |
+| Patch management | macOS patching not supported; not yet run against a live Windows or Linux endpoint | `softwareupdate -l` scanning; validate on real endpoints before claiming parity |
+| PSA | No email-to-ticket, customer portal, or accounting integration | Inbound email webhook, a signed-link customer portal, QuickBooks/Xero export |
+| Usability | Tickets, Monitor and several older views still use the earlier layout | Move them onto the shared page, table and form components |
+| Scale and maturity | No fleet-scale validation, certifications, or customer base | Load testing, SOC 2 programme, CI unblocked |
 
 ## Where ProofOS leads
 

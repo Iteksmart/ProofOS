@@ -80,6 +80,7 @@ class DeviceCreate(BaseModel):
     os: str = ""
     ip: str = ""
     device_type: str = "workstation"
+    customer_id: int | None = None
 
 
 class DeviceHeartbeat(BaseModel):
@@ -88,6 +89,7 @@ class DeviceHeartbeat(BaseModel):
     mem: float = 0.0
     status: str = "online"
     agent_version: str = ""
+    reboot_required: bool | None = None
 
 
 class DeviceOut(BaseModel):
@@ -103,6 +105,8 @@ class DeviceOut(BaseModel):
     mem: float
     agent_version: str = ""
     last_seen: datetime | None = None
+    reboot_required: bool = False
+    customer_id: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -131,6 +135,7 @@ class TicketCreate(BaseModel):
     body: str = ""
     priority: str = "normal"
     device_id: int | None = None
+    customer_id: int | None = None
 
 
 class TicketUpdate(BaseModel):
@@ -140,6 +145,7 @@ class TicketUpdate(BaseModel):
     priority: str | None = None
     assignee: str | None = None
     device_id: int | None = None
+    customer_id: int | None = None
     due_at: datetime | None = None
 
 
@@ -158,6 +164,7 @@ class TicketOut(BaseModel):
     severity: str = "P3"
     assignee: str
     device_id: int | None = None
+    customer_id: int | None = None
     due_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -632,6 +639,7 @@ class PatchOut(BaseModel):
     available_version: str
     severity: str
     status: str
+    approval: str = "unreviewed"
 
     model_config = ConfigDict(from_attributes=True)
 

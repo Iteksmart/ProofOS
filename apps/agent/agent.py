@@ -13,6 +13,7 @@ import os
 import platform
 import socket
 import subprocess
+import sys
 import time
 
 import httpx
@@ -143,6 +144,27 @@ def inventory() -> dict:
     }
 
 
+def reboot_required() -> bool | None:
+    """True when the OS reports a pending reboot; None when it cannot be determined."""
+    try:
+        if sys.platform.startswith("win"):
+            import winreg
+
+            for key in (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
+                        r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"):
+                try:
+                    winreg.CloseKey(winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key))
+                    return True
+                except OSError:
+                    continue
+            return False
+        if sys.platform.startswith("linux"):
+            return os.path.exists("/var/run/reboot-required")
+    except Exception:  # noqa: BLE001 - never let detection break the heartbeat
+        return None
+    return None
+
+
 def heartbeat(client: httpx.Client, device_id: int) -> bool:
     data = inventory()
     r = client.post(
@@ -153,6 +175,7 @@ def heartbeat(client: httpx.Client, device_id: int) -> bool:
             "mem": data["mem"],
             "status": data["status"],
             "agent_version": AGENT_VERSION,
+            "reboot_required": reboot_required(),
         },
     )
     return r.status_code == 200
