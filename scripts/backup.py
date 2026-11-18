@@ -59,6 +59,8 @@ def main() -> int:
     ap.add_argument("--encrypt-key", default="", help="Fernet key file; writes <backup>.tar.enc")
     ap.add_argument("--copy-to", default="", help="directory for an offsite copy of the archive")
     ap.add_argument("--new-key", default="", help="create a new encryption key file and exit")
+    ap.add_argument("--rclone-remote", default="", help="upload the encrypted archive with rclone, e.g. b2proofos:proofos-backups-itechsmart/proofos")
+    ap.add_argument("--keep-local", type=int, default=0, help="after a successful run keep only the newest N local backups (0 = keep all)")
     args = ap.parse_args()
 
     from cryptography.fernet import Fernet
@@ -124,8 +126,27 @@ def main() -> int:
             shutil.copy2(sealed, dest / sealed.name)
             shutil.copy2(target.parent / (sealed.name + ".sha256"), dest)
             print(f"  copied to {dest}")
-    elif args.copy_to:
-        raise SystemExit("--copy-to requires --encrypt-key: never copy an unencrypted backup offsite")
+        if args.rclone_remote:
+            rclone = shutil.which("rclone") or str(pathlib.Path.home() / "AppData/Local/Microsoft/WinGet/Links/rclone.exe")
+            remote = args.rclone_remote.rstrip("/")
+            for item in (sealed, target.parent / (sealed.name + ".sha256")):
+                # --no-check-dest: the upload key is write-only, so rclone must not try to list the bucket first.
+                result = subprocess.run([rclone, "copyto", str(item), f"{remote}/{item.name}", "--no-check-dest", "--retries", "5"],
+                                        capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise SystemExit(f"offsite upload of {item.name} failed: {result.stderr.strip()[-500:]}")
+            print(f"  uploaded to {remote}/{sealed.name}")
+    elif args.copy_to or args.rclone_remote:
+        raise SystemExit("--copy-to and --rclone-remote require --encrypt-key: never send an unencrypted backup offsite")
+    if args.keep_local > 0:
+        out = pathlib.Path(args.out)
+        runs = sorted(p for p in out.iterdir() if p.is_dir() and p.name[:8].isdigit())
+        for old in runs[:-args.keep_local]:
+            shutil.rmtree(old)
+            for extra in out.glob(old.name + ".tar.enc*"):
+                extra.unlink()
+        if len(runs) > args.keep_local:
+            print(f"  pruned {len(runs) - args.keep_local} older local backup(s); keeping {args.keep_local}")
     print(f"Verify with: python scripts/restore_check.py {target}")
     return 0
 
