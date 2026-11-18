@@ -88,8 +88,8 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ../.env
-    ports:
-      - "${PROOF_HOST_PORT:-127.0.0.1:8114}:8113"  # host 8113 is used by the iTechSmart suite verify service
+    # No host port: the proof service lives only on the internal `data` network, which Docker never
+    # publishes. The API reaches it in-network at proof:8113.
     depends_on:
       api:
         condition: service_healthy

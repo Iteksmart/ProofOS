@@ -78,7 +78,7 @@ orgs/users are created through the authenticated `POST /v1/auth/orgs` and
 ```powershell
 docker compose -f infra/docker-compose.yml -f infra/docker-compose.production.yml config --quiet
 docker compose -f infra/docker-compose.yml -f infra/docker-compose.production.yml up -d --build
-# api :8000 · proof :8114 (host) · web :5173 (nginx) · postgres :5432 · redis :6379
+# api :8000 · proof :8113 (internal only) · web :5173 (nginx) · postgres :5432 · redis :6379
 ```
 
 - The production overlay fails at configuration time if required secrets or the
