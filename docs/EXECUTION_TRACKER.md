@@ -63,6 +63,21 @@ The roadmap made several assumptions. Here is what the code shows.
 
 **Phase 1 exit gate:** external exposure fixed, secrets rotated, restore drill passed with measured RTO/RPO, CI green with scanners, unverified claims removed, independent monitoring live.
 
+### Startup-budget route for blocked items (decided 2026-11-18)
+
+| ID | Recommended route | Expected cost |
+|---|---|---|
+| P1-10 | Clear the account billing lock (Settings → Billing), then set the Actions spending limit to $0. ProofOS is a public repo, so standard GitHub-hosted runners cost nothing. Interim: `scripts/ci_local.py` | $0 (plus any overdue balance) |
+| P1-07 | Backblaze B2 bucket with Object Lock (compliance mode, 30–90 day retention) + rclone, nightly Windows scheduled task; encryption key in a password manager plus an offline printed copy. Backups are under 1 MB, well inside the 10 GB free tier | $0 |
+| P1-07b | Point-in-time recovery: WAL-G or pgBackRest (both open source) archiving WAL to the same B2 bucket | $0 |
+| P1-02 | Bind iTechSmart suite containers to 127.0.0.1; expose only what must be public through Cloudflare Tunnel + Cloudflare Access (free for small teams); Windows Firewall blocks inbound as immediate containment | $0 |
+| P1-03 | Rotate SEAL_TOKEN and default secrets; keep them in git-ignored .env files now, SOPS + age (open source) for secrets that must live in git | $0 |
+| P1-11 | Restart ops-api, djuane-ai and api-gateway via the Host Services Watchdog task; re-run the three suites | $0 |
+| P1-12 | Fix the origin behind verify.itechsmart.dev (Cloudflare 502 = origin/tunnel down). Monitoring: Uptime Kuma (open source) on an Oracle Cloud Always Free VM, so it is off this machine, with its status page | $0 |
+| P1-13 | Sigstore cosign keyless signing in GitHub Actions for containers and the agent archive; Azure Artifact Signing Basic only when Windows binaries ship | $0 now; $9.99/month later |
+| P1-14 | Design partners from the owner's network and MSP communities; free 90-day pilot in exchange for measured results and a reference | $0 |
+| P1-15 | Self-host Probo (already in the iTechSmart stack) or Comp AI (open source) for policies and evidence; buy a SOC 2 Type I audit only when a design partner or deal requires it | $0 now; Type I audit typically $5k–$15k later |
+
 ## Phase 2 — Observability platform (weeks 4–12)
 
 | ID | Task | Status |
