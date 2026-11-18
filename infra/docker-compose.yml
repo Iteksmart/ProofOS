@@ -7,10 +7,22 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-proofos}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-proofos}
       POSTGRES_DB: ${POSTGRES_DB:-proofos}
+    # Point-in-time recovery: every completed WAL segment is copied to /wal-archive, and a segment is
+    # forced at least every PROOFOS_ARCHIVE_TIMEOUT seconds, which bounds data loss (RPO) together
+    # with the shipping interval of scripts/wal_ship.py.
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /wal-archive/%f && cp %p /wal-archive/%f
+      - -c
+      - archive_timeout=${PROOFOS_ARCHIVE_TIMEOUT:-1800}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ${PROOFOS_WAL_ARCHIVE:-../backups/wal-archive}:/wal-archive
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-proofos} -d ${POSTGRES_DB:-proofos}"]
       interval: 5s
