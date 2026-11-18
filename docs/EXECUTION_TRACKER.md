@@ -1,0 +1,132 @@
+# ProofOS execution tracker — road to 8/10
+
+Single source of truth for the 24-week programme. Update the status and
+evidence columns in the same commit as the work. A task is **Done** only when its
+evidence exists (test, CI run, report, receipt, or document), not when code is
+written.
+
+**Status key:** ✅ Done · 🟡 In progress · ⬜ Not started · ⛔ Blocked (needs owner decision or access)
+**Scope key:** **PO** = this repository (ProofOS) · **ITS** = iTechSmart suite / host (outside this repo) · **ORG** = company/business
+
+Last updated: 2026-11-17
+
+## Scoreboard
+
+| Area | Start | Now | Target | Gate to claim the next point |
+|---|:-:|:-:|:-:|---|
+| Observability | 6 | 6 | 8 | All three OTLP signals into ClickHouse; Explore and dashboards working end to end |
+| AI root-cause analysis | 6 | 6 | 8 | Fault benchmark of 50+ scenarios: top-1 ≥ 80%, top-3 ≥ 95%, median under 60 s |
+| Autonomous remediation | 6 | 6 | 8 | Typed runbooks with mandatory verification; published auto-fix and rollback rates |
+| Compliance evidence | 5 | 5 | 8 | Evidence packs exported; independent SOC 2 report issued (not just in progress) |
+| Reliability and scale | 3 | 3 | 8 | Restore drill measured, HA failover tested, 10,000-agent load test published, 3+ design partners |
+
+Scores move only when a gate's evidence is linked below.
+
+## Gap assessment (2026-11-17)
+
+The roadmap made several assumptions. Here is what the code shows.
+
+| Assumption | Finding | Effect on plan |
+|---|---|---|
+| ~87 containers exposed on 0.0.0.0 | **ProofOS: none.** Every ProofOS container binds 127.0.0.1. **iTechSmart suite: 90 published 0.0.0.0 bindings** (60+ `suite-*` containers) on this host. | Exposure work is ITS-scope; needs owner go-ahead and the suite's compose files. |
+| Secrets committed in source | **ProofOS: none found.** Production compose refuses to start without strong secrets. Dev compose falls back to `proofos` only for local dev. **ITS:** defaults remain in suite compose, ops-api, djuane-proxy, gitops seal file; SEAL_TOKEN was in smoke.ps1. | Rotation is ITS-scope. Add gitleaks to ProofOS CI to keep it clean. |
+| Hard-coded compliance scores | **ProofOS: none.** Audit score is computed from findings. **ITS:** api-gateway serves fixed NIST 96 / HIPAA 100 / composite 92 and "SOC 2 Type II in progress"; the fix is on disk but not deployed. | ITS-scope: restart api-gateway; agree SOC 2 wording. |
+| CI blocked | Workflow is complete (tests, migrations, audits, e2e) but GitHub Actions cannot run (account billing lock). No secret, container or config scanning, and no SBOM. | Add scanners to the workflow; run gates locally until billing is fixed. |
+| Backups exist | **None** in ProofOS. No pg_dump, WAL archiving, offsite copy or restore test. | Build backup and verified-restore tooling (P1-05/06). |
+| Telemetry store | OTLP HTTP **JSON only**, logs and traces only (no metrics), stored in Postgres with 7-day retention. No query language or dashboards. | Phase 2 as planned. |
+| RCA | Dependency-graph probable-cause ranking exists (health and depth only). No change correlation, anomaly baselines or benchmark. | Phase 3 as planned; reuse the break-it simulator from ITS. |
+| Remediation | Signed agent jobs, approvals, access grants, recovery probes, cancellation, kill switch exist. No typed runbook registry, risk tiers, canary rollout or mandatory verification. | Phase 3 builds on the signed agent. |
+| Receipts | Ed25519 hash chain, RFC 3161 anchoring and ProofLink bridge exist. | Reuse in every workstream. |
+| Push hub and rate limits | In-process (single API worker). | Move to Redis before HA (P4). |
+
+**Is ProofOS a working application?** Yes. It is deployed locally (Docker: API, web, Postgres, Redis, proof service, MeshCentral), with source in this repository, 138 API tests, 14 agent tests and 18 end-to-end tests passing. Phase 1 here is production hardening, not finishing core architecture.
+
+## Phase 1 — Secure and stabilise (weeks 1–4)
+
+| ID | Task | Scope | Status | Evidence / notes |
+|---|---|:-:|:-:|---|
+| P1-01 | Inventory ProofOS services, ports and secrets | PO | ✅ | Gap assessment above |
+| P1-02 | Inventory iTechSmart suite exposure (90 × 0.0.0.0) and move to loopback behind nginx/cloudflared | ITS | ⛔ | Needs owner go-ahead and access to the suite compose files |
+| P1-03 | Rotate SEAL_TOKEN and remove default secrets in suite files | ITS | ⛔ | Owner action |
+| P1-04 | Secret, container and config scanning plus SBOM in CI | PO | 🟡 | `security-scan` job added to `.github/workflows/ci.yml` (gitleaks full history, Trivy vuln/misconfig/secret, CycloneDX SBOM) and `.gitleaks.toml`. Cannot run until P1-10; the local secret scan passes |
+| P1-05 | Backup tool: Postgres dump, ledger export, signing public key, SHA-256 manifest | PO | ✅ | `scripts/backup.py`; optional Fernet-encrypted archive, refuses an unencrypted offsite copy. First real backup 2026-11-18: 178 receipts, schema b4d6f8a1c3e5 |
+| P1-06 | Verified restore drill into an isolated database: chain verifies, RTO recorded | PO | ✅ | `scripts/restore_check.py`: restores into a network-isolated throwaway Postgres 15, checks file hashes, schema, row counts, every receipt's hash, Ed25519 signature (key captured at backup time) and chain. **Measured: 8.9 s restore + verify**, also from an encrypted offsite copy (9.5 s). Tamper test: a re-hashed receipt with a fixed manifest is caught (signature and chain fail) |
+| P1-07 | Offsite encrypted copy with retention lock | PO/ORG | ⛔ | Tooling ready (`backup.py --encrypt-key K --copy-to DIR`). Needs: a storage target with versioning and retention lock (e.g. S3 Object Lock, Backblaze B2, Azure immutable blob), a scheduled task, and the key stored apart from backups. PITR (WAL archiving) is still needed for RPO ≤ 1 h; nightly dumps give RPO ≤ 24 h |
+| P1-08 | Deep self-check endpoint (DB, ledger integrity, anchor age, stuck jobs, ingestion) | PO | ✅ | `GET /v1/ops/selfcheck` (admin, manager, auditor): ledger chain and head signature, anchor age, stale and stuck jobs, connected agents, telemetry age, kill switch; `tests/test_selfcheck.py` covers chain tampering. Still needs an external monitor polling it (P1-12) |
+| P1-09 | Run CI gates locally until GitHub billing is resolved | PO | ✅ | `scripts/ci_local.py`: 12 gates (secrets, migrations, API, proof, MCP, agent, agent build, web build, web unit, pip-audit, npm audit, e2e); JSON report per run. 2026-11-17: **all 12 passed** (139 API, 14 agent, 18 e2e) |
+| P1-10 | Resolve GitHub Actions billing lock | ORG | ⛔ | Owner action |
+| P1-11 | Remove hard-coded compliance scores from iTechSmart api-gateway (restart service) | ITS | ⛔ | Fix is on disk; restart ops-api :8210, djuane-ai :3202, api-gateway :8312 |
+| P1-12 | Bring verify.itechsmart.dev back from 502; add an external uptime monitor and status page | ITS | ⛔ | Was 502 on 2026-11-17 |
+| P1-13 | Signed release artifacts (agent and images) | PO | ⬜ | Agent build is reproducible; signing needs a key decision |
+| P1-14 | Start design-partner recruiting (3–5 orgs) | ORG | ⬜ | Starts now, not in Phase 4 |
+| P1-15 | Select SOC 2 auditor; readiness assessment | ORG | ⬜ | Starts now |
+
+**Phase 1 exit gate:** external exposure fixed, secrets rotated, restore drill passed with measured RTO/RPO, CI green with scanners, unverified claims removed, independent monitoring live.
+
+## Phase 2 — Observability platform (weeks 4–12)
+
+| ID | Task | Status |
+|---|---|:-:|
+| P2-01 | OTLP metrics ingestion (gauge, sum, histogram semantics) | ⬜ |
+| P2-02 | OTLP HTTP/protobuf and gRPC, keeping HTTP/JSON | ⬜ |
+| P2-03 | Tenant identity from credentials only; per-tenant quotas and backpressure | ⬜ |
+| P2-04 | ClickHouse schemas (logs, spans, metrics, rollups, change events) with TTL | ⬜ |
+| P2-05 | Dual-write, compare, feature-flag cutover | ⬜ |
+| P2-06 | Constrained query language compiled to tenant-scoped parameterised SQL | ⬜ |
+| P2-07 | Explore page with saved queries | ⬜ |
+| P2-08 | Dashboards (six widget types) and auto service templates | ⬜ |
+| P2-09 | Metric threshold alerts wired into alerts, SLOs and tickets | ⬜ |
+| P2-10 | Synthetic HTTP/TCP probes from the agent (SSRF-safe) | ⬜ |
+| P2-11 | Ingestion benchmark and cross-tenant adversarial tests | ⬜ |
+
+## Phase 3 — Evidence-based AI RCA (weeks 8–16)
+
+| ID | Task | Status |
+|---|---|:-:|
+| P3-01 | Unified incident timeline (deploys, config, patches, commands, anomalies) with receipt references | ⬜ |
+| P3-02 | Seasonal anomaly baselines per service (error rate, p95, saturation) | ⬜ |
+| P3-03 | Evidence-scored ranking with an "insufficient evidence" outcome | ⬜ |
+| P3-04 | Multi-step investigation with citations and a time budget | ⬜ |
+| P3-05 | Fault benchmark: 50+ scenarios, held-out set, published accuracy | ⬜ |
+
+## Phase 3 — Safe remediation (weeks 8–18)
+
+| ID | Task | Status |
+|---|---|:-:|
+| P3-10 | Typed, versioned runbook registry (batch A: 5 runbooks) | ⬜ |
+| P3-11 | Risk tiers enforced by the policy engine; time-limited approval tokens; idempotency keys | ⬜ |
+| P3-12 | Durable remediation state machine with canary-then-rollout | ⬜ |
+| P3-13 | Mandatory verification per runbook; compensate or escalate on failure | ⬜ |
+| P3-14 | Receipts for every transition | ⬜ |
+| P3-15 | Promotion policy (recommend → approve → auto) | ⬜ |
+
+## Phase 3–4 — Compliance evidence (weeks 8–24)
+
+| ID | Task | Status |
+|---|---|:-:|
+| P3-20 | Canonical control library mapped to SOC 2 / ISO 27001 (professional review) | ⬜ |
+| P3-21 | Evidence-pack export (PDF + JSON/CSV manifest + verification results) | ⬜ |
+| P3-22 | Honest status model in the UI (not assessed → attested) | ⬜ |
+| P3-23 | Company security programme with named owners | ⬜ |
+| P3-24 | SOC 2 Type I fieldwork and report | ⬜ |
+
+## Phase 4 — Reliability, scale, customers (weeks 12–24)
+
+| ID | Task | Status |
+|---|---|:-:|
+| P4-01 | Move push hub and rate limits to Redis; multiple API replicas | ⬜ |
+| P4-02 | Managed Postgres with tested failover; two zones | ⬜ |
+| P4-03 | 10,000-agent load test (connected, reconnect storm, command burst) | ⬜ |
+| P4-04 | Integrations wave 1: Slack/Teams, Jira, PagerDuty | ⬜ |
+| P4-05 | Integrations wave 2: ServiceNow, Entra ID, Okta | ⬜ |
+| P4-06 | Public status page and 99.9% SLO | ⬜ |
+| P4-07 | Design-partner pilots with measured outcomes | ⬜ |
+
+## Flagship demo (regression test and sales proof)
+
+A bad deployment breaks checkout. OTel detects it, the incident correlates the deploy receipt, the AI ranks it with citations, a typed rollback runbook is approved, canaried, verified, rolled out, and the evidence pack exports. Build this as an automated end-to-end test as soon as Phase 3 pieces exist.
+
+## Change log
+
+- 2026-11-17: Tracker created; gap assessment done.
+- 2026-11-18: P1-05, P1-06, P1-08 and P1-09 done; P1-04 added to CI (waiting on P1-10). Reliability stays 3: offsite storage, PITR and HA are still open.

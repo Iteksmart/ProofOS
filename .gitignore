@@ -41,3 +41,6 @@ Thumbs.db
 
 # Screenshots captured by e2e runs and reviews
 /*.png
+scripts/ci-reports/
+backups/
+*.key

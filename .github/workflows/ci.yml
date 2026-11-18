@@ -108,6 +108,40 @@ jobs:
         run: |
           npm install
           npm audit --omit=dev
+      - name: Audit agent dependencies
+        run: pip-audit -r apps/agent/requirements.txt
+
+  security-scan:
+    name: Secrets, misconfiguration and SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # scan the full history, not only the latest commit
+      - name: Secret scan (gitleaks, full history)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 git /repo --config /repo/.gitleaks.toml --redact --verbose
+      - name: Vulnerability and misconfiguration scan (Dockerfiles, compose, dependencies)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          skip-dirs: node_modules,apps/web/node_modules,apps/web/dist
+          exit-code: "1"
+      - name: Software bill of materials (CycloneDX)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: proofos-sbom.cdx.json
+          skip-dirs: node_modules,apps/web/node_modules,apps/web/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: proofos-sbom.cdx.json
 
   compose:
     name: Compose config

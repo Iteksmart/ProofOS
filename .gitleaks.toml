@@ -1,0 +1,22 @@
+# gitleaks configuration: default rules, plus allowlists for values that are
+# deliberately fake (CI-only placeholders, test fixtures, documentation samples).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secret test and documentation values"
+paths = [
+  '''apps/web/e2e/''',
+  '''services/api/tests/''',
+  '''apps/agent/tests/''',
+  '''services/proof/tests/''',
+  '''packages/mcp/tests/''',
+  '''\.env\.example$''',
+  '''docs/.*\.md$''',
+]
+regexes = [
+  '''ci-only-[a-z-]+''',
+  '''e2e-secret-[a-z0-9-]+''',
+  '''0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef''',
+  '''DemoPassword123''',
+]
