@@ -89,7 +89,7 @@ services:
     env_file:
       - ../.env
     ports:
-      - "127.0.0.1:8113:8113"
+      - "${PROOF_HOST_PORT:-127.0.0.1:8114}:8113"  # host 8113 is used by the iTechSmart suite verify service
     depends_on:
       api:
         condition: service_healthy

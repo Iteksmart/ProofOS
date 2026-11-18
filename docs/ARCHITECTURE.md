@@ -68,7 +68,7 @@ See `docs/AI-BACKENDS.md`.
 | web | 5173 | Vite dev; `4173` preview |
 | postgres | 5432 | `proofos` DB |
 | redis | 6379 | cache / queue |
-| proof | 8113 | verify / chain (mirrors suite `:8113`) |
+| proof | 8113 in-network, 8114 on the host | verify / chain (host 8113 belongs to the suite verify service) |
 
 ## Vendor integrations (MCP-first)
 

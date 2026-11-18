@@ -82,7 +82,7 @@ WebSocket /v1/ws/events (org-scoped live updates)
 
 - Docker Engine 24+ and Docker Compose v2
 - A domain name and TLS certificate (recommended: Let's Encrypt)
-- Ports: `80/443` (web), `8000` (API), `8113` (proof), `8096` (MeshCentral web), `44330` (MeshCentral agent)
+- Ports: `80/443` (web), `8000` (API), `8114` (proof, container port 8113), `8096` (MeshCentral web), `44330` (MeshCentral agent)
 
 ### 3.2 Clone & configure
 
